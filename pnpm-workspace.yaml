@@ -6,3 +6,6 @@ allowBuilds:
     cpu-features: false
     protobufjs: false
     ssh2: false
+minimumReleaseAgeExclude:
+    - "@nick-lukashik/auth@0.1.0"
+    - "@nick-lukashik/contracts@0.1.0"

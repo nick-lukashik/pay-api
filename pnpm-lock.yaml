@@ -185,11 +185,11 @@ importers:
         specifier: 12.1.0
         version: 12.1.0(@grpc/grpc-js@1.14.7)(@grpc/proto-loader@0.8.1)(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(@nestjs/swagger@12.0.5(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)(typescript@7.0.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nick-lukashik/auth':
-        specifier: file:../../packages/auth
-        version: file:../../packages/auth(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+        specifier: 0.1.0
+        version: 0.1.0(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nick-lukashik/contracts':
-        specifier: file:../../packages/contracts
-        version: file:../../packages/contracts(zod@4.6.7)
+        specifier: 0.1.0
+        version: 0.1.0(zod@4.6.7)
       '@prometheus-io/client':
         specifier: 0.16.1
         version: 0.16.1
@@ -998,25 +998,16 @@ packages:
       '@nestjs/platform-express':
         optional: true
 
-  '@nick-lukashik/auth@file:../../packages/auth':
-    resolution: {directory: ../../packages/auth, type: directory}
+  '@nick-lukashik/auth@0.1.0':
+    resolution: {integrity: sha512-eIGzM1tuvovBVtdZUdtrd7/ipV45Cpez1ys8X0u6ro61io0pHfHwuKU9klQhzhKSzFSIaYFDzEH4vL6+LflYjg==, tarball: https://npm.pkg.github.com/download/@nick-lukashik/auth/0.1.0/fbf8604749911586173d4815cfd5d4735224973d}
     peerDependencies:
       '@nestjs/common': ^12.0.0
       '@nestjs/core': ^12.0.0
       reflect-metadata: ^0.2.0
       rxjs: ^7.8.0
-    peerDependenciesMeta:
-      '@nestjs/common':
-        optional: true
-      '@nestjs/core':
-        optional: true
-      reflect-metadata:
-        optional: true
-      rxjs:
-        optional: true
 
-  '@nick-lukashik/contracts@file:../../packages/contracts':
-    resolution: {directory: ../../packages/contracts, type: directory}
+  '@nick-lukashik/contracts@0.1.0':
+    resolution: {integrity: sha512-ptJLCLv+mcZfTqvaVhnj6gK9nXgrO5ktbT//iEkxGXmr73ZVNaI1RmNx8fUJm1D9O6fDP97vFsC/yriXdXbqSw==, tarball: https://npm.pkg.github.com/download/@nick-lukashik/contracts/0.1.0/871fcea74bac0091ba9a9daf5f80657a4bd9eefc}
     peerDependencies:
       zod: ^4.6.0
 
@@ -3378,16 +3369,15 @@ snapshots:
     optionalDependencies:
       '@nestjs/platform-express': 12.3.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)
 
-  '@nick-lukashik/auth@file:../../packages/auth(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)':
+  '@nick-lukashik/auth@0.1.0(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)':
     dependencies:
-      jose: 6.2.14
-    optionalDependencies:
       '@nestjs/common': 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 12.3.2(@nestjs/common@12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.3.2)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      jose: 6.2.14
       reflect-metadata: 0.2.2
       rxjs: 7.8.2
 
-  '@nick-lukashik/contracts@file:../../packages/contracts(zod@4.6.7)':
+  '@nick-lukashik/contracts@0.1.0(zod@4.6.7)':
     dependencies:
       zod: 4.6.7
 

@@ -35,9 +35,9 @@ export const envSchema = baseEnvSchema
         LAVA_API_KEY: z.string().optional(),
         /** The X-Api-Key Lava sends with webhooks; separate from the API key. */
         LAVA_WEBHOOK_SECRET: z.string().optional(),
-        LAVA_OFFER_GRM_100: z.uuid().optional(),
-        LAVA_OFFER_GRM_550: z.uuid().optional(),
-        LAVA_OFFER_GRM_1200: z.uuid().optional(),
+        LAVA_OFFER_COINS_100: z.uuid().optional(),
+        LAVA_OFFER_COINS_550: z.uuid().optional(),
+        LAVA_OFFER_COINS_1200: z.uuid().optional(),
     })
     .refine(
         value =>
@@ -54,7 +54,7 @@ export const envSchema = baseEnvSchema
         path: [
             'PAY_PROVIDER',
         ],
-        message: 'the fake provider gives GRM without money: in production only with PAY_ALLOW_FAKE=true (stage)',
+        message: 'the fake provider gives coins without money: in production only with PAY_ALLOW_FAKE=true (stage)',
     })
 
 export type Env = z.output<typeof envSchema>

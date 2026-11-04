@@ -36,12 +36,12 @@ const checkout = (token: string, key: string | undefined, body: Record<string, u
 }
 
 describe('catalog and checkout', () => {
-    it('lists the GRM packs', async () => {
+    it('lists the coin packs', async () => {
         const response = await t.http().get('/api/v1/catalog').expect(200)
         expect(response.body.items.map((item: { key: string }) => item.key)).toEqual([
-            'grm-100',
-            'grm-550',
-            'grm-1200',
+            'coins-100',
+            'coins-550',
+            'coins-1200',
         ])
     })
 
@@ -49,31 +49,31 @@ describe('catalog and checkout', () => {
         const { token } = await buyer()
         const key = `checkout-${randomUUID()}`
         const first = await checkout(token, key, {
-            productKey: 'grm-550',
+            productKey: 'coins-550',
             currency: 'RUB',
         }).expect(200)
         expect(first.body).toMatchObject({
-            productKey: 'grm-550',
-            grm: '550',
-            amount: '499',
+            productKey: 'coins-550',
+            coins: '550',
+            amount: '500',
             currency: 'RUB',
             status: 'pending',
             checkoutUrl: `https://id.example.test/payments/fake/${first.body.id}`,
         })
         const again = await checkout(token, key, {
-            productKey: 'grm-550',
+            productKey: 'coins-550',
             currency: 'RUB',
         }).expect(200)
         expect(again.body.id).toBe(first.body.id)
         await checkout(token, key, {
-            productKey: 'grm-100',
+            productKey: 'coins-100',
             currency: 'RUB',
         }).expect(409)
         await checkout(token, undefined, {
-            productKey: 'grm-100',
+            productKey: 'coins-100',
         }).expect(400)
         await checkout(token, `checkout-${randomUUID()}`, {
-            productKey: 'grm-9999',
+            productKey: 'coins-9999',
         }).expect(400)
     })
 })
@@ -82,7 +82,7 @@ describe('confirmation', () => {
     it('confirms a fake payment once and publishes it; strangers get 404', async () => {
         const { userId, token } = await buyer()
         const created = await checkout(token, `checkout-${randomUUID()}`, {
-            productKey: 'grm-100',
+            productKey: 'coins-100',
         }).expect(200)
         const stranger = await buyer()
         await t
@@ -109,13 +109,13 @@ describe('confirmation', () => {
             envelope: {
                 payload: {
                     userId: string
-                    grm: string
+                    coins: string
                 }
             }
         }>(sql`select envelope from outbox where type = 'pay.payment.succeeded.v1'`)
         const mine = events.rows.filter(row => row.envelope.payload.userId === userId)
         expect(mine).toHaveLength(1)
-        expect(mine[0]?.envelope.payload.grm).toBe('100')
+        expect(mine[0]?.envelope.payload.coins).toBe('100')
 
         const history = await t.http().get('/api/v1/me/payments').set('authorization', `Bearer ${token}`).expect(200)
         expect(history.body.items[0]).toMatchObject({

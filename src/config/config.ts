@@ -41,9 +41,9 @@ export const payConfig = registerAs('pay', () => ({
         apiKey: env().LAVA_API_KEY ?? '',
         webhookSecret: env().LAVA_WEBHOOK_SECRET ?? '',
         offers: {
-            LAVA_OFFER_GRM_100: env().LAVA_OFFER_GRM_100,
-            LAVA_OFFER_GRM_550: env().LAVA_OFFER_GRM_550,
-            LAVA_OFFER_GRM_1200: env().LAVA_OFFER_GRM_1200,
+            LAVA_OFFER_COINS_100: env().LAVA_OFFER_COINS_100,
+            LAVA_OFFER_COINS_550: env().LAVA_OFFER_COINS_550,
+            LAVA_OFFER_COINS_1200: env().LAVA_OFFER_COINS_1200,
         } as Record<string, string | undefined>,
     },
 }))

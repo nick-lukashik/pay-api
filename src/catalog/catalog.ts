@@ -2,7 +2,7 @@ import type { Currency } from '@nick-lukashik/contracts'
 
 export type Product = {
     key: string
-    grm: number
+    coins: number
     title: {
         en: string
         ru: string
@@ -14,52 +14,52 @@ export type Product = {
 }
 
 /**
- * GRM packs for sale. Prices are a starting point chosen without the owner;
- * a change here is a new price for new checkouts, past payments keep their
- * snapshot.
+ * Coin packs for sale: $1 is 100 coins, bigger packs add a bonus. Prices
+ * in rubles and euros are round numbers next to the dollar ones. A change
+ * here is a new price for new checkouts; past payments keep their snapshot.
  */
 export const catalog: readonly Product[] = [
     {
-        key: 'grm-100',
-        grm: 100,
+        key: 'coins-100',
+        coins: 100,
         title: {
-            en: '100 GRM',
-            ru: '100 GRM',
+            en: '100 coins',
+            ru: '100 монет',
         },
         prices: {
-            RUB: '99',
-            USD: '1.19',
-            EUR: '1.09',
+            RUB: '100',
+            USD: '1',
+            EUR: '1',
         },
-        lavaOfferEnv: 'LAVA_OFFER_GRM_100',
+        lavaOfferEnv: 'LAVA_OFFER_COINS_100',
     },
     {
-        key: 'grm-550',
-        grm: 550,
+        key: 'coins-550',
+        coins: 550,
         title: {
-            en: '550 GRM (+10%)',
-            ru: '550 GRM (+10%)',
+            en: '550 coins (+10%)',
+            ru: '550 монет (+10%)',
         },
         prices: {
-            RUB: '499',
-            USD: '5.99',
-            EUR: '5.49',
+            RUB: '500',
+            USD: '5',
+            EUR: '5',
         },
-        lavaOfferEnv: 'LAVA_OFFER_GRM_550',
+        lavaOfferEnv: 'LAVA_OFFER_COINS_550',
     },
     {
-        key: 'grm-1200',
-        grm: 1200,
+        key: 'coins-1200',
+        coins: 1200,
         title: {
-            en: '1200 GRM (+20%)',
-            ru: '1200 GRM (+20%)',
+            en: '1200 coins (+20%)',
+            ru: '1200 монет (+20%)',
         },
         prices: {
-            RUB: '999',
-            USD: '11.99',
-            EUR: '10.99',
+            RUB: '1000',
+            USD: '10',
+            EUR: '10',
         },
-        lavaOfferEnv: 'LAVA_OFFER_GRM_1200',
+        lavaOfferEnv: 'LAVA_OFFER_COINS_1200',
     },
 ]
 

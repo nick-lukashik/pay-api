@@ -70,7 +70,7 @@ export class PaymentsService {
                 .values({
                     userId,
                     productKey: product.key,
-                    grm: product.grm,
+                    coins: product.coins,
                     amount: product.prices[input.currency],
                     currency: input.currency,
                     provider: this.provider.name,
@@ -238,7 +238,7 @@ export class PaymentsService {
                     paymentId: payment.id,
                     userId: payment.userId,
                     productKey: payment.productKey,
-                    grm: String(payment.grm),
+                    coins: String(payment.coins),
                     amount: payment.amount,
                     currency: payment.currency,
                     provider: payment.provider,
@@ -280,7 +280,7 @@ export class PaymentsService {
         return {
             id: row.id,
             productKey: row.productKey,
-            grm: String(row.grm),
+            coins: String(row.coins),
             amount: row.amount,
             currency: row.currency,
             provider: row.provider,

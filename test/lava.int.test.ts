@@ -23,14 +23,14 @@ afterAll(async () => {
 })
 
 /** A payment that Lava already has an invoice for. */
-async function pendingPayment(amount = '499') {
+async function pendingPayment(amount = '500') {
     const contractId = `c-${randomUUID()}`
     const [row] = await t.db
         .insert(payments)
         .values({
             userId: randomUUID(),
-            productKey: 'grm-550',
-            grm: 550,
+            productKey: 'coins-550',
+            coins: 550,
             amount,
             currency: 'RUB',
             provider: 'lava',
@@ -64,7 +64,7 @@ describe('Lava webhooks', () => {
             eventType: 'payment.success',
             contractId: payment.contractId,
             status: 'completed',
-            amount: 499,
+            amount: 500,
             currency: 'RUB',
         }
         const first = await webhook(SECRET, body).expect(200)
@@ -82,7 +82,7 @@ describe('Lava webhooks', () => {
     })
 
     it('does not pay out when the amount differs from the order snapshot', async () => {
-        const payment = await pendingPayment('499')
+        const payment = await pendingPayment('500')
         const response = await webhook(SECRET, {
             eventType: 'payment.success',
             contractId: payment.contractId,

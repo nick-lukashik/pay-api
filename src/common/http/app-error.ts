@@ -5,7 +5,7 @@ export const errorStatus = {
     VALIDATION_FAILED: 400,
     /** No valid access token: refresh and retry, or sign in. */
     UNAUTHORIZED: 401,
-    /** Not enough GRM on the wallet for a debit. */
+    /** Not enough coins on the wallet for a debit. */
     INSUFFICIENT_FUNDS: 402,
     FORBIDDEN: 403,
     NOT_FOUND: 404,

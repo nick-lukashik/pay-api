@@ -12,7 +12,7 @@ const at = (name: string) =>
     })
 
 /**
- * One checkout. The server decides the user, the product, the GRM, the amount
+ * One checkout. The server decides the user, the product, the coins, the amount
  * and the currency from the catalog: the snapshot is immutable, and a provider
  * fact is applied only when it matches it. A return URL proves nothing.
  */
@@ -22,7 +22,7 @@ export const payments = pgTable(
         id: uuid('id').primaryKey().default(sql`uuidv7()`),
         userId: uuid('user_id').notNull(),
         productKey: text('product_key').notNull(),
-        grm: bigint('grm', {
+        coins: bigint('coins', {
             mode: 'number',
         }).notNull(),
         /** Decimal string, as in the catalog ("449", "4.99"). */
@@ -58,7 +58,7 @@ export const payments = pgTable(
         uniqueIndex('payments_user_key_uq').on(t.userId, t.idempotencyKey),
         uniqueIndex('payments_provider_id_uq').on(t.provider, t.providerPaymentId),
         index('payments_user_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
-        check('payments_grm_positive', sql`${t.grm} > 0`),
+        check('payments_coins_positive', sql`${t.coins} > 0`),
     ],
 )
 

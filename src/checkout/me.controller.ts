@@ -38,7 +38,7 @@ export class MePaymentsController {
         description: '8-128 characters [A-Za-z0-9._:-]; a retry with the same key returns the same payment',
     })
     @ApiOperation({
-        summary: 'Start paying for a GRM pack; returns the provider checkout URL',
+        summary: 'Start paying for a coin pack; returns the provider checkout URL',
     })
     @ApiErrors(400, 401, 403, 409)
     checkout(

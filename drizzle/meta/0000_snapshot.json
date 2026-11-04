@@ -201,8 +201,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "grm": {
-          "name": "grm",
+        "coins": {
+          "name": "coins",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
@@ -359,9 +359,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "payments_grm_positive": {
-          "name": "payments_grm_positive",
-          "value": "\"payments\".\"grm\" > 0"
+        "payments_coins_positive": {
+          "name": "payments_coins_positive",
+          "value": "\"payments\".\"coins\" > 0"
         }
       },
       "isRLSEnabled": false

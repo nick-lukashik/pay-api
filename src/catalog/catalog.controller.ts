@@ -7,13 +7,13 @@ import { catalog } from './catalog.js'
 export class CatalogController {
     @Get()
     @ApiOperation({
-        summary: 'GRM packs and their prices',
+        summary: 'Coin packs and their prices',
     })
     list() {
         return {
             items: catalog.map(product => ({
                 key: product.key,
-                grm: String(product.grm),
+                coins: String(product.coins),
                 title: product.title,
                 prices: product.prices,
             })),

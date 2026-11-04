@@ -25,7 +25,7 @@ CREATE TABLE "payments" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
 	"user_id" uuid NOT NULL,
 	"product_key" text NOT NULL,
-	"grm" bigint NOT NULL,
+	"coins" bigint NOT NULL,
 	"amount" text NOT NULL,
 	"currency" text NOT NULL,
 	"provider" text NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE "payments" (
 	"paid_at" timestamp (3) with time zone,
 	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "payments_grm_positive" CHECK ("payments"."grm" > 0)
+	CONSTRAINT "payments_coins_positive" CHECK ("payments"."coins" > 0)
 );
 --> statement-breakpoint
 CREATE TABLE "webhook_events" (

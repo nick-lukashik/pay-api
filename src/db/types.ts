@@ -7,3 +7,4 @@ export type Db = NodePgDatabase<typeof schema>
 export type Tx = TxOf<Db>
 
 export type PaymentRow = typeof schema.payments.$inferSelect
+export type WebhookEventRow = typeof schema.webhookEvents.$inferSelect

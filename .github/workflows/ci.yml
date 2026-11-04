@@ -1,0 +1,28 @@
+name: ci
+
+# The org reusable workflow (nick-lukashik/.github, docs/ci.md): pnpm verify
+# with every service container and the image build. The example is never
+# published or deployed: it only proves that all capabilities work together.
+
+on:
+    pull_request:
+    push:
+        branches: [master]
+
+permissions: {}
+
+jobs:
+    # Job id "ci" gives the required check "ci / verify".
+    ci:
+        uses: nick-lukashik/.github/.github/workflows/build.yml@v1
+        # packages: write only because build.yml's image job declares it; with
+        # publish: false that job never runs.
+        permissions:
+            contents: read
+            packages: write
+        with:
+            kind: api
+            # Exported as TEST_DATABASE_URL, TEST_REDIS_URL, TEST_RABBITMQ_URL; the
+            # integration tests use them instead of Testcontainers (test/global-setup.ts).
+            services: postgres,redis,rabbitmq
+            publish: false

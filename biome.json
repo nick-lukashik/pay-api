@@ -1,0 +1,86 @@
+{
+    "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+    "files": {
+        "includes": ["**", "!dist", "!coverage", "!drizzle/meta"]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 120,
+        "lineEnding": "lf"
+    },
+    "javascript": {
+        "parser": {
+            "unsafeParameterDecoratorsEnabled": true
+        },
+        "formatter": {
+            "quoteStyle": "single",
+            "jsxQuoteStyle": "double",
+            "semicolons": "asNeeded",
+            "trailingCommas": "all",
+            "arrowParentheses": "asNeeded",
+            "bracketSpacing": true,
+            "bracketSameLine": false,
+            "quoteProperties": "asNeeded",
+            "attributePosition": "multiline",
+            "expand": "always",
+            "operatorLinebreak": "before"
+        }
+    },
+    "linter": {
+        "enabled": true,
+        "domains": {
+            "drizzle": "recommended",
+            "test": "recommended"
+        },
+        "rules": {
+            "preset": "recommended",
+            "style": {
+                "useImportType": "off",
+                "useConsistentArrayType": {
+                    "level": "error",
+                    "options": {
+                        "syntax": "shorthand"
+                    }
+                },
+                "useConsistentTypeDefinitions": {
+                    "level": "error",
+                    "options": {
+                        "style": "type"
+                    }
+                },
+                "useFilenamingConvention": {
+                    "level": "error",
+                    "options": {
+                        "filenameCases": ["kebab-case"]
+                    }
+                }
+            },
+            "complexity": {
+                "noStaticOnlyClass": "off"
+            },
+            "suspicious": {
+                "noDrizzleUpdateWithoutWhere": {
+                    "level": "error",
+                    "options": {
+                        "drizzleObjectName": ["db", "tx"]
+                    }
+                },
+                "noDrizzleDeleteWithoutWhere": {
+                    "level": "error",
+                    "options": {
+                        "drizzleObjectName": ["db", "tx"]
+                    }
+                }
+            }
+        }
+    },
+    "assist": {
+        "actions": {
+            "source": {
+                "organizeImports": "on"
+            }
+        }
+    }
+}

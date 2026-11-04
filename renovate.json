@@ -1,0 +1,38 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+    "timezone": "Asia/Tbilisi",
+    "schedule": ["* 0-5 * * 1"],
+    "minimumReleaseAge": "3 days",
+    "internalChecksFilter": "strict",
+    "rangeStrategy": "pin",
+    "lockFileMaintenance": {
+        "enabled": true,
+        "schedule": ["* 0-5 * * 1"]
+    },
+    "packageRules": [
+        {
+            "description": "Every non-major update in one PR; majors keep their own PRs.",
+            "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
+            "groupName": "all non-major dependencies",
+            "groupSlug": "all-minor-patch"
+        },
+        {
+            "description": "engines are minimums, not pins.",
+            "matchDepTypes": ["engines"],
+            "rangeStrategy": "auto"
+        },
+        {
+            "description": "Node majors: Dockerfile and .node-version move together.",
+            "matchDepNames": ["node"],
+            "matchUpdateTypes": ["major"],
+            "groupName": "Node.js"
+        },
+        {
+            "description": "Org reusable workflows follow the moving major tag @v1 (docs/ci.md in nick-lukashik/.github); never pin them to a digest.",
+            "matchManagers": ["github-actions"],
+            "matchDepNames": ["nick-lukashik/.github"],
+            "pinDigests": false
+        }
+    ]
+}

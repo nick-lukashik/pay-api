@@ -1,0 +1,38 @@
+# Local dependencies: pnpm infra:up | infra:down | infra:reset (drops data).
+# Credentials are local-only placeholders; real ones come from the environment.
+name: pay-api
+
+services:
+    postgres:
+        image: postgres:18.6-alpine
+        environment:
+            POSTGRES_USER: app
+            POSTGRES_PASSWORD: app
+            POSTGRES_DB: app
+        ports: ["5444:5432"]
+        volumes:
+            - postgres:/var/lib/postgresql
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U app -d app"]
+            interval: 5s
+            timeout: 3s
+            retries: 20
+
+    rabbitmq:
+        image: rabbitmq:4.4.0-management-alpine
+        environment:
+            RABBITMQ_DEFAULT_USER: app
+            RABBITMQ_DEFAULT_PASS: app
+        ports: ["5684:5672", "15684:15672"]
+        volumes:
+            - rabbitmq:/var/lib/rabbitmq
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+            interval: 10s
+            timeout: 10s
+            retries: 20
+
+volumes:
+    postgres:
+    redis:
+    rabbitmq:

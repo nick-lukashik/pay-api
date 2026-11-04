@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { REQUEST_TIMEOUT_MS } from '../src/common/http/request-timeout.js'
 import { payments } from '../src/db/schema.js'
 import type { PaymentRow } from '../src/db/types.js'
 import {
@@ -23,6 +24,8 @@ class ScriptedProvider extends PaymentProvider {
     readonly invoices = new Map<string, Checkout>()
     created = 0
     during: ((invoice: Checkout, payment: PaymentRow) => Promise<void>) | undefined
+    /** `findCheckout` finds the invoice without its URL, as Lava's list does. */
+    findsWithoutUrl = false
 
     async createCheckout({ payment }: CheckoutInput) {
         this.created += 1
@@ -36,7 +39,13 @@ class ScriptedProvider extends PaymentProvider {
     }
 
     async findCheckout(payment: PaymentRow) {
-        return this.invoices.get(payment.id) ?? null
+        const found = this.invoices.get(payment.id)
+        if (!found) return null
+        return this.findsWithoutUrl
+            ? {
+                  providerPaymentId: found.providerPaymentId,
+              }
+            : found
     }
 
     async lookup() {
@@ -68,6 +77,7 @@ afterAll(async () => {
 })
 beforeEach(() => {
     provider.during = undefined
+    provider.findsWithoutUrl = false
 })
 
 async function buyer() {
@@ -103,7 +113,7 @@ const stored = async (key: string) => {
 }
 
 describe('one provider checkout per payment', () => {
-    it('creates one invoice for parallel requests with one key', async () => {
+    it('creates one invoice for parallel requests with one key, and every request gets its URL', async () => {
         const { token, key } = await buyer()
         const before = provider.created
         const held = Promise.withResolvers<void>()
@@ -119,30 +129,71 @@ describe('one provider checkout per payment', () => {
                     return response
                 }),
         )
-        try {
-            // Everyone but the executor answers while its provider call is held.
-            await expect
-                .poll(() => answered, {
-                    timeout: 5_000,
-                })
-                .toBe(7)
-        } finally {
-            held.resolve()
-        }
+        await expect.poll(() => provider.created - before).toBe(1)
+        // Everyone waits for the executor's provider call instead of answering 'creating' at once.
+        await new Promise(resolve => setTimeout(resolve, 1_000))
+        expect(answered).toBe(0)
+        held.resolve()
         const responses = await Promise.all(requests)
 
         expect(provider.created - before).toBe(1)
         expect(responses.map(response => response.status)).toEqual(Array(8).fill(200))
-        expect(new Set(responses.map(response => response.body.id)).size).toBe(1)
-        expect(responses.map(response => response.body.status).sort()).toEqual([
-            ...Array(7).fill('creating'),
-            'pending',
-        ])
-        const again = await checkout(token, key)
-        expect(again.body).toMatchObject({
-            status: 'pending',
-            checkoutUrl: provider.invoices.get(again.body.id)?.checkoutUrl,
+        const [first] = responses
+        for (const response of responses)
+            expect(response.body).toMatchObject({
+                id: first?.body.id,
+                status: 'pending',
+                checkoutUrl: provider.invoices.get(first?.body.id)?.checkoutUrl,
+            })
+    })
+
+    it('answers creating only after waiting, within the request budget, for a provider call that takes longer', async () => {
+        const { token, key } = await buyer()
+        const before = provider.created
+        const held = Promise.withResolvers<void>()
+        provider.during = () => held.promise
+        const executor = checkout(token, key)
+        await expect.poll(() => provider.created - before).toBe(1)
+
+        const started = performance.now()
+        const waiting = await checkout(token, key)
+        const waited = performance.now() - started
+        expect(waiting.status).toBe(200)
+        expect(waiting.body).toMatchObject({
+            status: 'creating',
+            checkoutUrl: null,
         })
+        expect(waited).toBeGreaterThan(8_000)
+        expect(waited).toBeLessThan(REQUEST_TIMEOUT_MS)
+
+        held.resolve()
+        const answer = await executor
+        expect(answer.body.status).toBe('pending')
+        expect((await checkout(token, key)).body).toMatchObject({
+            status: 'pending',
+            checkoutUrl: answer.body.checkoutUrl,
+        })
+        expect(provider.created - before).toBe(1)
+    })
+
+    it('takes over while waiting when the executor gives its claim back', async () => {
+        const { token, key } = await buyer()
+        const before = provider.created
+        const held = Promise.withResolvers<void>()
+        provider.during = async () => {
+            await held.promise
+            throw new CheckoutRefused('Lava answered 400')
+        }
+        const executor = checkout(token, key)
+        await expect.poll(() => provider.created - before).toBe(1)
+        const waiting = checkout(token, key)
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        provider.during = undefined
+        held.resolve()
+        expect((await executor).status).toBe(503)
+        expect((await waiting).body.status).toBe('pending')
+        expect(provider.created - before).toBe(2)
     })
 
     it('finds the invoice of a lost answer instead of creating a second one', async () => {
@@ -216,6 +267,87 @@ describe('one provider checkout per payment', () => {
             status: 'succeeded',
             providerPaymentId: `inv-${before + 2}-${taken.body.id}`,
             checkoutUrl: taken.body.checkoutUrl,
+        })
+    })
+
+    describe('a late answer after the checkout was found without its URL', () => {
+        /** The executor is stuck past its claim; the next request finds its invoice, without the URL. */
+        const lostCheckout = async () => {
+            const { token, key } = await buyer()
+            const before = provider.created
+            const held = Promise.withResolvers<void>()
+            provider.during = () => held.promise
+            const late = checkout(token, key)
+            await expect.poll(() => provider.created - before).toBe(1)
+            await t.db
+                .update(payments)
+                .set({
+                    checkoutLeaseUntil: sql`now() - interval '1 second'`,
+                })
+                .where(eq(payments.idempotencyKey, key))
+            provider.findsWithoutUrl = true
+            const found = await checkout(token, key)
+            expect(found.body).toMatchObject({
+                status: 'failed',
+                checkoutUrl: null,
+            })
+            expect(await stored(key)).toMatchObject({
+                failureReason: 'checkout_lost',
+                checkoutUrl: null,
+            })
+            return {
+                key,
+                invoice: provider.invoices.get(found.body.id),
+                answer: () => {
+                    held.resolve()
+                    return late
+                },
+            }
+        }
+
+        it('brings the payment back to pending with that URL', async () => {
+            const { key, invoice, answer } = await lostCheckout()
+            expect((await answer()).body).toMatchObject({
+                status: 'pending',
+                checkoutUrl: invoice?.checkoutUrl,
+            })
+            expect(await stored(key)).toMatchObject({
+                status: 'pending',
+                failureReason: null,
+                checkoutUrl: invoice?.checkoutUrl,
+                providerPaymentId: invoice?.providerPaymentId,
+            })
+        })
+
+        it('leaves a payment that failed at the provider failed', async () => {
+            const { key, answer } = await lostCheckout()
+            await t.db
+                .update(payments)
+                .set({
+                    failureReason: 'provider',
+                })
+                .where(eq(payments.idempotencyKey, key))
+            expect((await answer()).body.status).toBe('failed')
+            expect(await stored(key)).toMatchObject({
+                status: 'failed',
+                failureReason: 'provider',
+                checkoutUrl: null,
+            })
+        })
+
+        it('ignores an answer about another invoice', async () => {
+            const { key, answer } = await lostCheckout()
+            await t.db
+                .update(payments)
+                .set({
+                    providerPaymentId: `other-${randomUUID()}`,
+                })
+                .where(eq(payments.idempotencyKey, key))
+            expect((await answer()).body.status).toBe('failed')
+            expect(await stored(key)).toMatchObject({
+                status: 'failed',
+                checkoutUrl: null,
+            })
         })
     })
 })

@@ -1,0 +1,2 @@
+ALTER TABLE "payments" ADD COLUMN "reconciled_at" timestamp (3) with time zone;--> statement-breakpoint
+CREATE INDEX "payments_unreconciled_idx" ON "payments" USING btree ("id") WHERE "payments"."status" = 'succeeded' and "payments"."reconciled_at" is null;

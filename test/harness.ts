@@ -34,6 +34,10 @@ export async function startApp(identity: Identity, overrides: Record<string, str
         ID_API_URL: identity.url,
         ID_INTERNAL_TOKEN: identity.internalToken,
         ID_WEB_URL: 'https://id.example.test',
+        WALLET_API_URL: 'http://wallet.example.test',
+        WALLET_INTERNAL_TOKEN: 'w'.repeat(48),
+        // Tests run the reconciliation rounds themselves.
+        RECONCILIATION_INTERVAL_MS: '0',
         PAY_PROVIDER: 'fake',
         ...overrides,
     })

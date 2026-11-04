@@ -62,15 +62,15 @@ const cursor = cursorCodec(
 
 /**
  * How long one executor owns a payment's checkout: longer than its provider
- * calls take (each bounded by the adapter's timeout, Lava 10 s), so a live
- * executor keeps it and a crashed one frees it.
+ * calls take (each bounded by the adapter's own timeout), so a live executor
+ * keeps it and a crashed one frees it.
  */
 const CHECKOUT_LEASE = sql`interval '30 seconds'`
 
 /**
- * How long a request waits for another one's provider call before it answers
- * 'creating': under the whole-request budget (10 s, REQUEST_TIMEOUT_MS), since
- * a longer wait reaches the caller as a 504.
+ * How long after it started a request may wait for another one's provider call
+ * before it answers 'creating': under the whole-request budget (10 s,
+ * REQUEST_TIMEOUT_MS), since a longer wait reaches the caller as a 504.
  */
 const CHECKOUT_WAIT_MS = 8_500
 const CHECKOUT_POLL_MS = 250
@@ -83,6 +83,9 @@ const snapshotMinor = (payment: PaymentRow) => {
 }
 
 export type FactOutcome = 'processed' | 'ignored' | 'unmatched' | 'mismatch'
+
+/** What the provider's record of a pending payment came to; see `askProvider`. */
+export type ProviderAnswer = 'applied' | 'open' | 'missing' | 'mismatch'
 
 const resultOf = (outcome: FactOutcome): WebhookResult =>
     outcome === 'processed' ? 'applied' : outcome === 'ignored' ? 'duplicate' : outcome
@@ -126,6 +129,8 @@ export class PaymentsService {
         },
         idempotencyKey: string,
     ) {
+        // From the start of the request: the lookups below use up the same budget.
+        const waitUntil = performance.now() + CHECKOUT_WAIT_MS
         const product = productByKey(input.productKey)
         if (!product)
             throw new AppError('VALIDATION_FAILED', 'Request validation failed', [
@@ -167,10 +172,14 @@ export class PaymentsService {
         const user = await this.users.recipient(userId)
         if (!user || user.status !== 'active') throw new AppError('FORBIDDEN', 'Account not active')
         return this.view(
-            await this.createCheckout(payment.id, {
-                email: user.email,
-                locale: user.locale,
-            }),
+            await this.createCheckout(
+                payment.id,
+                {
+                    email: user.email,
+                    locale: user.locale,
+                },
+                waitUntil,
+            ),
         )
     }
 
@@ -187,8 +196,9 @@ export class PaymentsService {
             email: string
             locale: 'en' | 'ru'
         },
+        waitUntil: number,
     ) {
-        const claim = await this.claimOrWait(id)
+        const claim = await this.claimOrWait(id, waitUntil)
         if (!claim.token) return claim.payment
         let checkout: FoundCheckout
         try {
@@ -221,10 +231,9 @@ export class PaymentsService {
      * usually ends within the wait, so the caller gets the URL. If that executor
      * gives its claim back, the next poll takes it over.
      */
-    private async claimOrWait(id: string) {
-        const deadline = performance.now() + CHECKOUT_WAIT_MS
+    private async claimOrWait(id: string, waitUntil: number) {
         let claim = await this.claimCheckout(id)
-        while (!claim.token && claim.payment.status === 'creating' && performance.now() < deadline) {
+        while (!claim.token && claim.payment.status === 'creating' && performance.now() < waitUntil) {
             await sleep(CHECKOUT_POLL_MS)
             claim = await this.claimCheckout(id)
         }
@@ -433,10 +442,10 @@ export class PaymentsService {
      * read from it, and applied in the same transaction. A success that leaves
      * out the amount or the currency is confirmed by the provider's own record
      * instead; until that record shows it, the answer is 503 and nothing is
-     * recorded, so the provider's retry asks again. One that finds no payment
-     * stays received (unmatched) and is applied when its payment gets the
-     * provider id; a repeated delivery of it tries again instead of counting as
-     * a duplicate.
+     * recorded, only counted as deferred and logged, so the provider's retry
+     * asks again. One that finds no payment stays received (unmatched) and is
+     * applied when its payment gets the provider id; a repeated delivery of it
+     * tries again instead of counting as a duplicate.
      */
     async receive(parsed: ParsedWebhook, payloadSha256: string): Promise<WebhookResult> {
         const result = await this.settle(parsed, payloadSha256)
@@ -460,6 +469,7 @@ export class PaymentsService {
                 || record.currency === undefined
             ) {
                 // Its record can lag behind its webhook: rejecting now would lose a real payment for good.
+                this.webhookMetrics.count('deferred')
                 this.logger.warn(
                     {
                         providerPaymentId: fact.providerPaymentId,
@@ -474,37 +484,87 @@ export class PaymentsService {
                 dedupeKey: fact.dedupeKey,
             }
         }
-        const verified = fact
+        return this.recordFact(fact, payloadSha256)
+    }
+
+    /** A verified fact: recorded once by its dedupe key, and applied in the same transaction. */
+    private recordFact(fact: ProviderFact, payloadSha256: string): Promise<WebhookResult> {
         return this.db.transaction(async tx => {
-            await this.lockProviderPayment(tx, verified.providerPaymentId)
+            await this.lockProviderPayment(tx, fact.providerPaymentId)
             const [inserted] = await tx
                 .insert(webhookEvents)
                 .values({
                     provider: this.provider.name,
-                    dedupeKey: verified.dedupeKey,
+                    dedupeKey: fact.dedupeKey,
                     payloadSha256,
                     outcome: 'unmatched',
-                    providerPaymentId: verified.providerPaymentId,
-                    paymentStatus: verified.outcome,
-                    amountMinor: verified.amountMinor ?? null,
-                    currency: verified.currency ?? null,
+                    providerPaymentId: fact.providerPaymentId,
+                    paymentStatus: fact.outcome,
+                    amountMinor: fact.amountMinor ?? null,
+                    currency: fact.currency ?? null,
                 })
                 .onConflictDoNothing()
                 .returning()
-            const event = inserted ?? (await this.unapplied(tx, verified.dedupeKey))
+            const event = inserted ?? (await this.unapplied(tx, fact.dedupeKey))
             if (!event) return 'duplicate'
             return resultOf(await this.applyRecorded(tx, event))
         })
     }
 
+    /** What became of the fact recorded under this key; undefined when there is none. */
     private async recorded(dedupeKey: string) {
         const [row] = await this.db
             .select({
-                id: webhookEvents.id,
+                outcome: webhookEvents.outcome,
             })
             .from(webhookEvents)
             .where(and(eq(webhookEvents.provider, this.provider.name), eq(webhookEvents.dedupeKey, dedupeKey)))
-        return Boolean(row)
+        return row?.outcome
+    }
+
+    /**
+     * Asks the provider about a pending payment whose webhook never came. A fact
+     * takes the path of a webhook, under a key of the payment and the outcome, so
+     * it is recorded once however often the payment is asked about, and a mismatch
+     * stays one: the same answer again counts, and changes nothing. A success
+     * without the money is not settled yet, as for a webhook: its record can lag,
+     * and recording it now would lose a real payment for good. Returns undefined
+     * when another path settled the payment meanwhile. Throws when the provider
+     * cannot be asked, with nothing changed.
+     */
+    async askProvider(payment: PaymentRow): Promise<ProviderAnswer | undefined> {
+        const { id, providerPaymentId } = payment
+        if (!providerPaymentId) throw new Error(`payment ${id} has no provider id`)
+        const record = await this.provider.lookup(providerPaymentId)
+        if (record === undefined) return 'missing'
+        if (record === 'open') return 'open'
+        if (record.outcome === 'succeeded' && (record.amountMinor === undefined || record.currency === undefined)) {
+            this.logger.warn(
+                {
+                    paymentId: id,
+                    providerPaymentId,
+                },
+                'The provider shows a success without the money: asked again later',
+            )
+            return 'open'
+        }
+        const fact = {
+            ...record,
+            providerPaymentId,
+            dedupeKey: `sync:${id}:${record.outcome}`,
+        }
+        // No payload here: the adapter keeps its format. The hash stands for the fact.
+        const sha256 = createHash('sha256')
+            .update(`${fact.dedupeKey}|${fact.amountMinor ?? ''}|${fact.currency ?? ''}`)
+            .digest('hex')
+        const result = await this.recordFact(fact, sha256)
+        if (result === 'applied') {
+            this.relay.kick()
+            return 'applied'
+        }
+        if (result === 'mismatch') return 'mismatch'
+        if (result === 'duplicate' && (await this.recorded(fact.dedupeKey)) === 'mismatch') return 'mismatch'
+        return undefined
     }
 
     /** The earlier delivery of this event, when it still waits for its payment. */
@@ -521,11 +581,13 @@ export class PaymentsService {
         try {
             return await this.provider.lookup(providerPaymentId)
         } catch (error) {
+            this.webhookMetrics.count('deferred')
             this.logger.warn(
                 {
+                    providerPaymentId,
                     err: (error as Error).message,
                 },
-                'Provider lookup failed',
+                'Provider lookup failed: asked to retry',
             )
             throw new AppError('UNAVAILABLE', 'Payment provider unavailable, retry later')
         }

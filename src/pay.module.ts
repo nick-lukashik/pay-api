@@ -5,9 +5,8 @@ import { IdClient } from './checkout/id-client.js'
 import { MePaymentsController } from './checkout/me.controller.js'
 import { PaymentsService } from './checkout/payments.service.js'
 import { payConfig } from './config/config.js'
-import { FakeProvider } from './providers/fake.provider.js'
-import { LavaProvider } from './providers/lava.provider.js'
 import { PaymentProvider } from './providers/provider.js'
+import { createProvider } from './providers/registry.js'
 import { ReconciliationService } from './reconciliation/reconciliation.service.js'
 import { WalletClient } from './reconciliation/wallet-client.js'
 import { WebhookMetrics } from './webhooks/webhook-metrics.js'
@@ -25,8 +24,7 @@ import { WebhooksController } from './webhooks/webhooks.controller.js'
             inject: [
                 payConfig.KEY,
             ],
-            useFactory: (config: ConfigType<typeof payConfig>) =>
-                config.provider === 'lava' ? new LavaProvider(config) : new FakeProvider(config),
+            useFactory: (config: ConfigType<typeof payConfig>) => createProvider(config.provider),
         },
         IdClient,
         PaymentsService,

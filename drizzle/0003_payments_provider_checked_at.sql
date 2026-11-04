@@ -1,0 +1,2 @@
+ALTER TABLE "payments" ADD COLUMN "provider_checked_at" timestamp (3) with time zone;--> statement-breakpoint
+CREATE INDEX "payments_unconfirmed_idx" ON "payments" USING btree ("provider_checked_at" NULLS FIRST,"id") WHERE "payments"."status" = 'pending' and "payments"."provider_payment_id" is not null;

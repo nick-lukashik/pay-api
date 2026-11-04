@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { Logger } from '@nestjs/common'
 import { eq, sql } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { payments, webhookEvents } from '../src/db/schema.js'
+import { ReconciliationService } from '../src/reconciliation/reconciliation.service.js'
 import { startApp, type TestApp } from './harness.js'
 import { type Identity, startIdentity } from './identity.js'
 import { type LavaApi, startLavaApi } from './lava-api.js'
@@ -140,6 +142,24 @@ describe('Lava checkout', () => {
         })
     })
 
+    it('refuses a product without an offer, and creates nothing', async () => {
+        const { token, key } = await buyer()
+        const before = lava.created
+        const response = await t
+            .http()
+            .post('/api/v1/me/checkout')
+            .set('authorization', `Bearer ${token}`)
+            .set('idempotency-key', key)
+            .send({
+                productKey: 'coins-100',
+                currency: 'RUB',
+            })
+        expect(response.status).toBe(503)
+        expect(lava.created - before).toBe(0)
+        const [row] = await t.db.select().from(payments).where(eq(payments.idempotencyKey, key))
+        expect(row?.status).toBe('created')
+    })
+
     it('finds the invoice of a lost answer by our payment id instead of creating a second one', async () => {
         const { token, key } = await buyer()
         const before = lava.created
@@ -169,6 +189,15 @@ describe('Lava checkout', () => {
 })
 
 describe('Lava webhooks', () => {
+    it('answers 404 under any name but the active provider, whatever the credential', async () => {
+        const before = await webhooks('rejected')
+        await t.http().post('/webhooks/fake').set('x-api-key', SECRET).send({}).expect(404)
+        await t.http().post('/webhooks/fake').send({}).expect(404)
+        await t.http().post('/webhooks/stripe').set('x-api-key', SECRET).send({}).expect(404)
+        await t.http().post('/webhooks/LAVA').set('x-api-key', SECRET).send({}).expect(404)
+        expect((await webhooks('rejected')) - before).toBe(0)
+    })
+
     it('checks the credential before anything else', async () => {
         const before = await webhooks('rejected')
         await webhook(undefined, {}).expect(401)
@@ -395,6 +424,72 @@ describe('Lava money checks', () => {
         expect(await credits(payment.id)).toBe(1)
     })
 
+    it('counts a deferred success on every try, and logs its provider id, not its payload', async () => {
+        const contractId = randomUUID()
+        const payment = await pendingPayment(contractId)
+        const body = success(contractId, {
+            buyer: 'nobody-may-log-this@example.com',
+        })
+        const warn = vi.spyOn(Logger.prototype, 'warn')
+        const deferred = await webhooks('deferred')
+
+        await webhook(SECRET, body).expect(503)
+        expect((await webhooks('deferred')) - deferred).toBe(1)
+        expect(warn).toHaveBeenCalledWith(
+            expect.objectContaining({
+                providerPaymentId: contractId,
+            }),
+            expect.any(String),
+        )
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('nobody-may-log-this')
+        expect(await recordedWebhooks(contractId)).toBe(0)
+
+        await webhook(SECRET, body).expect(503)
+        expect((await webhooks('deferred')) - deferred).toBe(2)
+
+        lava.invoices.set(contractId, {
+            id: contractId,
+            status: 'COMPLETED',
+            amount: 500,
+            currency: 'RUB',
+        })
+        const applied = await webhooks('applied')
+        expect((await webhook(SECRET, body).expect(200)).body.status).toBe('applied')
+        expect((await webhooks('applied')) - applied).toBe(1)
+        expect((await webhooks('deferred')) - deferred).toBe(2)
+        expect(await statusOf(payment.id)).toBe('succeeded')
+    })
+
+    it('counts as deferred a success it cannot ask Lava about, and keeps the 503', async () => {
+        const contractId = lava.add({
+            status: 'COMPLETED',
+            amount: 500,
+            currency: 'RUB',
+        })
+        const payment = await pendingPayment(contractId)
+        const body = success(contractId, {})
+        const warn = vi.spyOn(Logger.prototype, 'warn')
+        const deferred = await webhooks('deferred')
+
+        lava.answer = 'unavailable'
+        try {
+            await webhook(SECRET, body).expect(503)
+        } finally {
+            lava.answer = 'ok'
+        }
+        expect((await webhooks('deferred')) - deferred).toBe(1)
+        expect(warn).toHaveBeenCalledWith(
+            expect.objectContaining({
+                providerPaymentId: contractId,
+            }),
+            expect.any(String),
+        )
+        expect(await recordedWebhooks(contractId)).toBe(0)
+        expect(await statusOf(payment.id)).toBe('pending')
+
+        expect((await webhook(SECRET, body).expect(200)).body.status).toBe('applied')
+    })
+
     it('asks Lava to retry a success its record contradicts or leaves without the money', async () => {
         const failed = await pendingPayment(
             lava.add({
@@ -455,5 +550,117 @@ describe('Lava money checks', () => {
             hello: 'world',
         }).expect(200)
         expect(invalid.body.status).toBe('rejected')
+    })
+})
+
+describe('Lava payments whose webhook never came', () => {
+    /** A payment past the 10 minutes, whose invoice is `contractId`. */
+    const unconfirmed = async (contractId: string) => {
+        const payment = await pendingPayment(contractId)
+        await t.db
+            .update(payments)
+            .set({
+                createdAt: sql`now() - interval '11 minutes'`,
+            })
+            .where(eq(payments.id, payment.id))
+        return payment
+    }
+
+    const round = () => t.app.get(ReconciliationService).round()
+
+    const sync = (result: string) =>
+        t.metric('payment_provider_sync_total', {
+            result,
+        })
+
+    it('pays by the record of Lava, and a late webhook is a duplicate', async () => {
+        const payment = await unconfirmed(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 500,
+                currency: 'RUB',
+            }),
+        )
+        const applied = await sync('applied')
+        await round()
+        expect(await statusOf(payment.id)).toBe('succeeded')
+        expect((await sync('applied')) - applied).toBe(1)
+        expect(await credits(payment.id)).toBe(1)
+
+        const late = await webhook(
+            SECRET,
+            success(payment.contractId, {
+                amount: 500,
+                currency: 'RUB',
+            }),
+        ).expect(200)
+        expect(late.body.status).toBe('duplicate')
+        expect(await credits(payment.id)).toBe(1)
+    })
+
+    it('does not pay when the record of Lava shows other money', async () => {
+        const payment = await unconfirmed(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 499.99,
+                currency: 'RUB',
+            }),
+        )
+        const mismatch = await sync('mismatch')
+        await round()
+        expect(await statusOf(payment.id)).toBe('pending')
+        expect((await sync('mismatch')) - mismatch).toBe(1)
+        expect(await credits(payment.id)).toBe(0)
+    })
+
+    it('fails on a failed invoice, and changes nothing on an open one or a missing one', async () => {
+        const failed = await unconfirmed(
+            lava.add({
+                status: 'FAILED',
+                currency: 'RUB',
+            }),
+        )
+        const open = await unconfirmed(
+            lava.add({
+                status: 'IN_PROGRESS',
+                currency: 'RUB',
+            }),
+        )
+        const missing = await unconfirmed(`c-${randomUUID()}`)
+        const before = {
+            open: await sync('open'),
+            missing: await sync('missing'),
+        }
+        await round()
+        expect(await statusOf(failed.id)).toBe('failed')
+        expect(await statusOf(open.id)).toBe('pending')
+        expect(await statusOf(missing.id)).toBe('pending')
+        expect((await sync('open')) - before.open).toBe(1)
+        expect((await sync('missing')) - before.missing).toBe(1)
+    })
+
+    it('changes nothing and counts an error while Lava is down', async () => {
+        const payment = await unconfirmed(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 500,
+                currency: 'RUB',
+            }),
+        )
+        const errors = await sync('error')
+        lava.answer = 'unavailable'
+        try {
+            await round()
+        } finally {
+            lava.answer = 'ok'
+        }
+        expect(await statusOf(payment.id)).toBe('pending')
+        expect(await sync('error')).toBeGreaterThan(errors)
+
+        await t.db.update(payments).set({
+            providerCheckedAt: sql`now() - interval '1 hour'`,
+        })
+        await round()
+        expect(await statusOf(payment.id)).toBe('succeeded')
     })
 })

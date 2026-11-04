@@ -35,17 +35,21 @@ const contract = (invoice: LavaInvoice) => ({
     clientUtm: invoice.clientUtm ?? null,
 })
 
+/** How the stand-in answers: as Lava, a 4xx to a create call (nothing created), a 5xx to anything, or garbage. */
+export type LavaAnswer = 'ok' | 'refused' | 'unavailable' | 'malformed'
+
 /**
  * A stand-in for the parts of lava.top's API that pay-api calls (OpenAPI
  * 1.22.0): POST /api/v3/invoice, GET /api/v2/invoices, GET /api/v2/invoices/{id}.
  * It keeps every invoice; `onCreate` decides how a create call ends: answered,
- * or dropped after the invoice exists (a lost answer).
+ * or dropped after the invoice exists (a lost answer). `answer` covers the rest.
  */
 export async function startLavaApi(apiKey: string) {
     const invoices = new Map<string, LavaInvoice>()
     const api = {
         created: 0,
         onCreate: undefined as ((invoice: LavaInvoice) => Promise<'answer' | 'drop'>) | undefined,
+        answer: 'ok' as LavaAnswer,
     }
     const server: Server = createServer(async (request, response) => {
         const send = (status: number, body?: unknown) => {
@@ -54,8 +58,10 @@ export async function startLavaApi(apiKey: string) {
             response.end(body === undefined ? undefined : JSON.stringify(body))
         }
         if (request.headers['x-api-key'] !== apiKey) return send(401)
+        if (api.answer === 'unavailable') return send(503)
         const url = new URL(request.url ?? '/', 'http://lava.test')
         if (request.method === 'POST' && url.pathname === '/api/v3/invoice') {
+            if (api.answer === 'refused') return send(400)
             const body = await readJson(request)
             const invoice: LavaInvoice = {
                 id: randomUUID(),
@@ -68,12 +74,14 @@ export async function startLavaApi(apiKey: string) {
             invoices.set(invoice.id, invoice)
             api.created += 1
             if ((await api.onCreate?.(invoice)) === 'drop') return request.socket.destroy()
+            if (api.answer === 'malformed') return send(201, {})
             return send(201, {
                 id: invoice.id,
                 status: 'new',
                 paymentUrl: `https://pay.lava.top/${invoice.id}`,
             })
         }
+        if (api.answer === 'malformed') return send(200, {})
         if (request.method === 'GET' && url.pathname === '/api/v2/invoices') {
             const statuses = url.searchParams.getAll('invoiceStatuses')
             const currencies = url.searchParams.getAll('currencies')

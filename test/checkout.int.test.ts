@@ -24,7 +24,7 @@ class ScriptedProvider extends PaymentProvider {
     readonly invoices = new Map<string, Checkout>()
     created = 0
     during: ((invoice: Checkout, payment: PaymentRow) => Promise<void>) | undefined
-    /** `findCheckout` finds the invoice without its URL, as Lava's list does. */
+    /** `findCheckout` finds the invoice without its URL, as a provider's list may. */
     findsWithoutUrl = false
 
     async createCheckout({ payment }: CheckoutInput) {
@@ -182,7 +182,7 @@ describe('one provider checkout per payment', () => {
         const held = Promise.withResolvers<void>()
         provider.during = async () => {
             await held.promise
-            throw new CheckoutRefused('Lava answered 400')
+            throw new CheckoutRefused('provider answered 400')
         }
         const executor = checkout(token, key)
         await expect.poll(() => provider.created - before).toBe(1)
@@ -219,7 +219,7 @@ describe('one provider checkout per payment', () => {
         const { token, key } = await buyer()
         const before = provider.created
         provider.during = async () => {
-            throw new CheckoutRefused('Lava answered 400')
+            throw new CheckoutRefused('provider answered 400')
         }
         expect((await checkout(token, key)).status).toBe(503)
         expect((await stored(key))?.status).toBe('created')

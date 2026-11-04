@@ -140,6 +140,24 @@ describe('Lava checkout', () => {
         })
     })
 
+    it('refuses a product without an offer, and creates nothing', async () => {
+        const { token, key } = await buyer()
+        const before = lava.created
+        const response = await t
+            .http()
+            .post('/api/v1/me/checkout')
+            .set('authorization', `Bearer ${token}`)
+            .set('idempotency-key', key)
+            .send({
+                productKey: 'coins-100',
+                currency: 'RUB',
+            })
+        expect(response.status).toBe(503)
+        expect(lava.created - before).toBe(0)
+        const [row] = await t.db.select().from(payments).where(eq(payments.idempotencyKey, key))
+        expect(row?.status).toBe('created')
+    })
+
     it('finds the invoice of a lost answer by our payment id instead of creating a second one', async () => {
         const { token, key } = await buyer()
         const before = lava.created
@@ -169,6 +187,15 @@ describe('Lava checkout', () => {
 })
 
 describe('Lava webhooks', () => {
+    it('answers 404 under any name but the active provider, whatever the credential', async () => {
+        const before = await webhooks('rejected')
+        await t.http().post('/webhooks/fake').set('x-api-key', SECRET).send({}).expect(404)
+        await t.http().post('/webhooks/fake').send({}).expect(404)
+        await t.http().post('/webhooks/stripe').set('x-api-key', SECRET).send({}).expect(404)
+        await t.http().post('/webhooks/LAVA').set('x-api-key', SECRET).send({}).expect(404)
+        expect((await webhooks('rejected')) - before).toBe(0)
+    })
+
     it('checks the credential before anything else', async () => {
         const before = await webhooks('rejected')
         await webhook(undefined, {}).expect(401)

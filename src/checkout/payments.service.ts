@@ -62,8 +62,8 @@ const cursor = cursorCodec(
 
 /**
  * How long one executor owns a payment's checkout: longer than its provider
- * calls take (each bounded by the adapter's timeout, Lava 10 s), so a live
- * executor keeps it and a crashed one frees it.
+ * calls take (each bounded by the adapter's own timeout), so a live executor
+ * keeps it and a crashed one frees it.
  */
 const CHECKOUT_LEASE = sql`interval '30 seconds'`
 

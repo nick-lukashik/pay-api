@@ -1,10 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common'
-import type { ConfigType } from '@nestjs/config'
 import { secretMatches } from '@nick-lukashik/auth'
 import { type Currency, currencySchema } from '@nick-lukashik/contracts'
 import { z } from 'zod'
-import { productByKey } from '../catalog/catalog.js'
-import { payConfig } from '../config/config.js'
 import type { PaymentRow } from '../db/types.js'
 import { toMinorUnits } from './money.js'
 import { type CheckoutInput, CheckoutRefused, type ParsedWebhook, PaymentProvider } from './provider.js'
@@ -13,6 +9,27 @@ const TIMEOUT_MS = 10_000
 /** How far the search for a lost invoice goes: pages of the key's invoices since the payment was created. */
 const FIND_PAGES = 10
 const FIND_PAGE_SIZE = 50
+
+/** The variables of this adapter, read only when `PAY_PROVIDER=lava`. */
+export const lavaEnv = z.object({
+    LAVA_API_URL: z.url().default('https://gate.lava.top'),
+    LAVA_API_KEY: z.string().min(1),
+    /** The X-Api-Key Lava sends with webhooks; separate from the API key. */
+    LAVA_WEBHOOK_SECRET: z.string().min(32),
+    /** The offer of each product, see `offerOf`. */
+    LAVA_OFFER_COINS_100: z.uuid().optional(),
+    LAVA_OFFER_COINS_550: z.uuid().optional(),
+    LAVA_OFFER_COINS_1200: z.uuid().optional(),
+})
+type LavaEnv = z.output<typeof lavaEnv>
+
+/** Lava sells offers of the merchant account: the offer of each product of the catalog. */
+const offerOf = (env: LavaEnv, productKey: string) =>
+    ({
+        'coins-100': env.LAVA_OFFER_COINS_100,
+        'coins-550': env.LAVA_OFFER_COINS_550,
+        'coins-1200': env.LAVA_OFFER_COINS_1200,
+    })[productKey]
 
 const invoiceSchema = z.object({
     id: z.string().min(1).max(100),
@@ -68,23 +85,21 @@ const webhookSchema = z.object({
  * in `clientUtm.utm_content`, which Lava keeps on the contract: a lost answer
  * is found again by it in the key's list of contracts.
  */
-@Injectable()
 export class LavaProvider extends PaymentProvider {
     readonly name = 'lava'
 
-    constructor(@Inject(payConfig.KEY) private readonly config: ConfigType<typeof payConfig>) {
+    constructor(private readonly env: LavaEnv) {
         super()
     }
 
     async createCheckout({ payment, email, locale }: CheckoutInput) {
-        const product = productByKey(payment.productKey)
-        const offerId = product ? this.config.lava.offers[product.lavaOfferEnv] : undefined
+        const offerId = offerOf(this.env, payment.productKey)
         if (!offerId) throw new CheckoutRefused(`no Lava offer configured for ${payment.productKey}`)
         // Thrown before an answer (timeout, connection lost): Lava may have created it.
-        const response = await fetch(`${this.config.lava.apiUrl}/api/v3/invoice`, {
+        const response = await fetch(`${this.env.LAVA_API_URL}/api/v3/invoice`, {
             method: 'POST',
             headers: {
-                'x-api-key': this.config.lava.apiKey,
+                'x-api-key': this.env.LAVA_API_KEY,
                 'content-type': 'application/json',
             },
             body: JSON.stringify({
@@ -114,7 +129,7 @@ export class LavaProvider extends PaymentProvider {
     async findCheckout(payment: PaymentRow) {
         const signal = AbortSignal.timeout(TIMEOUT_MS)
         for (let page = 1; page <= FIND_PAGES; page++) {
-            const url = new URL(`${this.config.lava.apiUrl}/api/v2/invoices`)
+            const url = new URL(`${this.env.LAVA_API_URL}/api/v2/invoices`)
             // A minute of slack for the clocks of Lava and ours.
             url.searchParams.set('beginDate', new Date(payment.createdAt.getTime() - 60_000).toISOString())
             url.searchParams.set('currencies', payment.currency)
@@ -129,7 +144,7 @@ export class LavaProvider extends PaymentProvider {
             url.searchParams.set('size', String(FIND_PAGE_SIZE))
             const response = await fetch(url, {
                 headers: {
-                    'x-api-key': this.config.lava.apiKey,
+                    'x-api-key': this.env.LAVA_API_KEY,
                 },
                 signal,
             })
@@ -147,10 +162,10 @@ export class LavaProvider extends PaymentProvider {
 
     async lookup(providerPaymentId: string) {
         const response = await fetch(
-            `${this.config.lava.apiUrl}/api/v2/invoices/${encodeURIComponent(providerPaymentId)}`,
+            `${this.env.LAVA_API_URL}/api/v2/invoices/${encodeURIComponent(providerPaymentId)}`,
             {
                 headers: {
-                    'x-api-key': this.config.lava.apiKey,
+                    'x-api-key': this.env.LAVA_API_KEY,
                 },
                 signal: AbortSignal.timeout(TIMEOUT_MS),
             },
@@ -176,7 +191,7 @@ export class LavaProvider extends PaymentProvider {
 
     authenticate(headers: Record<string, string | string[] | undefined>) {
         const presented = headers['x-api-key']
-        return secretMatches(typeof presented === 'string' ? presented : undefined, this.config.lava.webhookSecret)
+        return secretMatches(typeof presented === 'string' ? presented : undefined, this.env.LAVA_WEBHOOK_SECRET)
     }
 
     parse(payload: unknown): ParsedWebhook {

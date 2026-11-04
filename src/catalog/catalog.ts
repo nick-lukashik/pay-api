@@ -9,8 +9,6 @@ export type Product = {
     }
     /** Decimal strings per currency. */
     prices: Record<Currency, string>
-    /** The provider's offer per product (Lava: an offer of the merchant account), from env. */
-    lavaOfferEnv: string
 }
 
 /**
@@ -31,7 +29,6 @@ export const catalog: readonly Product[] = [
             USD: '1',
             EUR: '1',
         },
-        lavaOfferEnv: 'LAVA_OFFER_COINS_100',
     },
     {
         key: 'coins-550',
@@ -45,7 +42,6 @@ export const catalog: readonly Product[] = [
             USD: '5',
             EUR: '5',
         },
-        lavaOfferEnv: 'LAVA_OFFER_COINS_550',
     },
     {
         key: 'coins-1200',
@@ -59,7 +55,6 @@ export const catalog: readonly Product[] = [
             USD: '10',
             EUR: '10',
         },
-        lavaOfferEnv: 'LAVA_OFFER_COINS_1200',
     },
 ]
 

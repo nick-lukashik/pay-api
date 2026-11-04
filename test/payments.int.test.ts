@@ -128,5 +128,6 @@ describe('confirmation', () => {
     it('accepts no webhooks for the fake provider and none for unknown ones', async () => {
         await t.http().post('/webhooks/fake').send({}).expect(401)
         await t.http().post('/webhooks/stripe').send({}).expect(404)
+        await t.http().post('/webhooks/lava').send({}).expect(404)
     })
 })

@@ -1,18 +1,34 @@
-import { Inject, Injectable } from '@nestjs/common'
-import type { ConfigType } from '@nestjs/config'
-import { payConfig } from '../config/config.js'
+import { z } from 'zod'
+import { baseEnvSchema } from '../common/config/define-env.js'
 import type { PaymentRow } from '../db/types.js'
 import { type CheckoutInput, type ParsedWebhook, PaymentProvider } from './provider.js'
+
+/** The variables of this adapter, read only when `PAY_PROVIDER=fake`. */
+export const fakeEnv = baseEnvSchema
+    .pick({
+        NODE_ENV: true,
+    })
+    .extend({
+        /** Stage runs NODE_ENV=production with the fake provider on purpose. */
+        PAY_ALLOW_FAKE: z.stringbool().default(false),
+        /** id-web: the fake checkout page. */
+        ID_WEB_URL: z.url().default('https://id.nick-lukashik.com'),
+    })
+    .refine(value => !(value.NODE_ENV === 'production' && !value.PAY_ALLOW_FAKE), {
+        path: [
+            'PAY_ALLOW_FAKE',
+        ],
+        message: 'the fake provider gives coins without money: in production only with PAY_ALLOW_FAKE=true (stage)',
+    })
 
 /**
  * No money: the checkout page is id-web's `/payments/fake/<id>`, which
  * confirms through `POST /me/payments/:id/fake-complete`. Local runs and stage only.
  */
-@Injectable()
 export class FakeProvider extends PaymentProvider {
     readonly name = 'fake'
 
-    constructor(@Inject(payConfig.KEY) private readonly config: ConfigType<typeof payConfig>) {
+    constructor(private readonly env: z.output<typeof fakeEnv>) {
         super()
     }
 
@@ -44,7 +60,7 @@ export class FakeProvider extends PaymentProvider {
     private checkoutOf(payment: PaymentRow) {
         return {
             providerPaymentId: `fake_${payment.id}`,
-            checkoutUrl: `${this.config.idWebUrl}/payments/fake/${payment.id}`,
+            checkoutUrl: `${this.env.ID_WEB_URL}/payments/fake/${payment.id}`,
         }
     }
 }

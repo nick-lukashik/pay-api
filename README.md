@@ -46,11 +46,11 @@ An advisory lock keeps a round to one pod at a time. Metrics: `payment_reconcili
 
 ## Provider sync
 
-A webhook can get lost, so the same job also asks the provider. After the ledger, each round takes up to 50 pending payments of the active provider with a provider id, from 10 minutes to 7 days old, those asked longest ago first, and calls `lookup` for each, outside any transaction. The lock keeps two pods from taking the same batch.
+A webhook can get lost, so the same job also asks the provider. After the ledger, each round takes up to 50 pending payments of the active provider with a provider id, from 10 minutes to 7 days old and not asked about in the last 10 minutes, those asked longest ago first, and calls `lookup` for each, outside any transaction. The lock and the 10 minutes keep two pods from asking about the same payment.
 
 - **A fact** takes the path of a webhook: it is recorded once in `webhook_events` under `sync:<payment id>:<outcome>` and applied under the payment's row lock, with the same exact amount and currency checks. A webhook that comes later is a duplicate.
 - **A mismatch** is recorded once, and the payment stays pending. Later rounds count it again, and a record corrected later does not pay it: someone has to look.
-- **A success without the money** counts as `open`, as the record can lag. Nothing is recorded, and the next round asks again.
+- **A success without the money** counts as `open`, as the record can lag. Nothing is recorded, and a later round asks again.
 - **`open`, or no record at the provider:** nothing changes.
 - **The provider cannot be asked:** nothing changes for that payment, the others go on, and a later round asks again.
 

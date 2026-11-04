@@ -25,6 +25,6 @@ jobs:
             # @nick-lukashik/auth and /contracts from GitHub Packages.
             github-packages: true
             # The image is pushed on master, so integrated tests can run pay-api. No deploy
-            # job until the Lava merchant account: without Lava it could only run the
+            # job until a payment provider is chosen: without one it could only run the
             # test provider, free coins for anyone.
             publish: true

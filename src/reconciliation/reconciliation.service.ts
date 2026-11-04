@@ -1,6 +1,6 @@
 import { type BeforeApplicationShutdown, Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import type { ConfigType } from '@nestjs/config'
-import { and, asc, count, eq, gt, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { PaymentsService, paymentSucceededEvent } from '../checkout/payments.service.js'
 import { DB } from '../common/database/database.js'
 import { OutboxRelay } from '../common/messaging/outbox-relay.js'
@@ -29,6 +29,8 @@ const isDue = () =>
 const UNCONFIRMED_AFTER = sql`interval '10 minutes'`
 /** How long the provider is asked: nothing expires a pending payment, and most of the old ones were abandoned. */
 const UNCONFIRMED_UNTIL = sql`interval '7 days'`
+/** How long before the provider is asked about a payment again: most stay open for days, and a provider limits its calls. */
+const ASK_AGAIN_AFTER = sql`interval '10 minutes'`
 /** Provider calls of one round: one at a time, each bounded by the adapter's own timeout. */
 const SYNC_BATCH_SIZE = 50
 
@@ -49,6 +51,9 @@ const isUnconfirmed = (provider: string) =>
         lt(payments.createdAt, sql`now() - ${UNCONFIRMED_AFTER}`),
         gt(payments.createdAt, sql`now() - ${UNCONFIRMED_UNTIL}`),
     )
+
+const isDueToAsk = () =>
+    or(isNull(payments.providerCheckedAt), lt(payments.providerCheckedAt, sql`now() - ${ASK_AGAIN_AFTER}`))
 
 /** The ref under which wallet-api posts a payment's pack. */
 const packRef = (paymentId: string) => `pack:payment:${paymentId}`
@@ -255,10 +260,11 @@ export class ReconciliationService implements OnApplicationBootstrap, BeforeAppl
     }
 
     /**
-     * The next batch, those asked longest ago first: payments nobody paid stay
-     * open for days and must not keep the newer ones waiting. Marked under the
-     * lock, so another pod takes others, and asked about after it: a provider
-     * call can outlast the server's limit on an idle transaction.
+     * The next batch, those asked longest ago first and none asked within the
+     * last 10 minutes: payments nobody paid stay open for days and must not keep
+     * the newer ones waiting. Marked under the lock, so another pod takes others,
+     * and asked about after it: a provider call can outlast the server's limit on
+     * an idle transaction.
      */
     private nextUnconfirmed() {
         return this.db.transaction(async tx => {
@@ -269,7 +275,7 @@ export class ReconciliationService implements OnApplicationBootstrap, BeforeAppl
             const due = await tx
                 .select()
                 .from(payments)
-                .where(isUnconfirmed(this.provider.name))
+                .where(and(isUnconfirmed(this.provider.name), isDueToAsk()))
                 .orderBy(sql`${payments.providerCheckedAt} asc nulls first`, asc(payments.id))
                 .limit(SYNC_BATCH_SIZE)
             if (due.length > 0)

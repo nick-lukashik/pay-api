@@ -544,7 +544,7 @@ export class PaymentsService {
                     paymentId: id,
                     providerPaymentId,
                 },
-                'The provider shows a success without the money: asked again next round',
+                'The provider shows a success without the money: asked again later',
             )
             return 'open'
         }

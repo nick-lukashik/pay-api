@@ -88,6 +88,12 @@ beforeEach(async () => {
 
 const round = (app = t) => app.app.get(ReconciliationService).round()
 
+/** Past the 10 minutes before a payment is asked about again; the order of those asked stays. */
+const timePasses = () =>
+    t.db.update(payments).set({
+        providerCheckedAt: sql`${payments.providerCheckedAt} - interval '1 hour'`,
+    })
+
 type Values = {
     [Column in keyof typeof payments.$inferInsert]?: (typeof payments.$inferInsert)[Column] | SQL
 }
@@ -276,6 +282,7 @@ describe('a payment whose webhook never came', () => {
         expect(error).toHaveBeenCalledTimes(1)
 
         // Still the same answer: counted, not recorded or logged again, and a later right record does not pay.
+        await timePasses()
         await round()
         expect(await since(before)).toEqual({
             mismatch: 2,
@@ -284,6 +291,7 @@ describe('a payment whose webhook never came', () => {
         expect(error).toHaveBeenCalledTimes(1)
 
         provider.records.set(payment.providerPaymentId, paid(payment.providerPaymentId))
+        await timePasses()
         await round()
         expect((await stored(payment.id)).status).toBe('pending')
         expect(await eventsOf(payment.id)).toEqual([])
@@ -320,6 +328,7 @@ describe('a payment whose webhook never came', () => {
             expect(await t.db.select().from(webhookEvents)).toEqual([])
 
             provider.records.set(payment.providerPaymentId, paid(payment.providerPaymentId))
+            await timePasses()
             await round()
             expect((await stored(payment.id)).status).toBe('succeeded')
         },
@@ -373,6 +382,7 @@ describe('a payment whose webhook never came', () => {
         )
 
         provider.records.set(broken.providerPaymentId, paid(broken.providerPaymentId))
+        await timePasses()
         await round()
         expect((await stored(broken.id)).status).toBe('succeeded')
     })
@@ -499,6 +509,7 @@ describe('a round', () => {
         const first = new Set(provider.asked)
 
         provider.asked = []
+        await timePasses()
         await round()
         expect(provider.asked).toHaveLength(50)
         expect(new Set(provider.asked).size).toBe(50)
@@ -517,6 +528,28 @@ describe('a round', () => {
         provider.asked = []
         await round()
         expect(provider.asked[0]).toBe(fresh.providerPaymentId)
+    })
+
+    it('asks about a payment again only after 10 minutes, whichever pod takes the round', async () => {
+        const payment = await pending()
+        provider.records.set(payment.providerPaymentId, 'open')
+        await round()
+        await round()
+        expect(provider.asked).toEqual([
+            payment.providerPaymentId,
+        ])
+
+        await t.db.update(payments).set({
+            providerCheckedAt: sql`now() - interval '9 minutes'`,
+        })
+        await round()
+        expect(provider.asked).toHaveLength(1)
+
+        await t.db.update(payments).set({
+            providerCheckedAt: sql`now() - interval '11 minutes'`,
+        })
+        await round()
+        expect(provider.asked).toHaveLength(2)
     })
 
     it('leaves the batch to the pod that holds the lock', async () => {

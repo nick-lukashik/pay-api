@@ -657,6 +657,9 @@ describe('Lava payments whose webhook never came', () => {
         expect(await statusOf(payment.id)).toBe('pending')
         expect(await sync('error')).toBeGreaterThan(errors)
 
+        await t.db.update(payments).set({
+            providerCheckedAt: sql`now() - interval '1 hour'`,
+        })
         await round()
         expect(await statusOf(payment.id)).toBe('succeeded')
     })

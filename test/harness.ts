@@ -9,15 +9,17 @@ import { DB } from '../src/common/database/database.js'
 import { Metrics } from '../src/common/metrics/metrics.js'
 import { env } from '../src/config/env.js'
 import type { Db } from '../src/db/types.js'
+import { PaymentProvider } from '../src/providers/provider.js'
 import { AUDIENCE, type Identity, ISSUER } from './identity.js'
 
 export type TestApp = Awaited<ReturnType<typeof startApp>>
 
 /**
  * The real AppModule against the shared containers, listening on a random
- * port. Every file starts from empty tables and an empty Redis.
+ * port. Every file starts from empty tables and an empty Redis. `provider`
+ * replaces the configured payment provider (answers under the test's control).
  */
-export async function startApp(identity: Identity, overrides: Record<string, string> = {}) {
+export async function startApp(identity: Identity, overrides: Record<string, string> = {}, provider?: PaymentProvider) {
     Object.assign(process.env, {
         NODE_ENV: 'test',
         LOG_LEVEL: process.env.TEST_LOG_LEVEL ?? 'silent',
@@ -38,11 +40,13 @@ export async function startApp(identity: Identity, overrides: Record<string, str
     env.reset()
 
     const { AppModule } = await import('../src/app.module.js')
-    const moduleRef = await Test.createTestingModule({
+    const builder = Test.createTestingModule({
         imports: [
             AppModule,
         ],
-    }).compile()
+    })
+    if (provider) builder.overrideProvider(PaymentProvider).useValue(provider)
+    const moduleRef = await builder.compile()
     const app = moduleRef.createNestApplication<NestExpressApplication>({
         bufferLogs: true,
     })

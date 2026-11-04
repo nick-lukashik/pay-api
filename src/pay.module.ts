@@ -8,6 +8,7 @@ import { payConfig } from './config/config.js'
 import { FakeProvider } from './providers/fake.provider.js'
 import { LavaProvider } from './providers/lava.provider.js'
 import { PaymentProvider } from './providers/provider.js'
+import { WebhookMetrics } from './webhooks/webhook-metrics.js'
 import { WebhooksController } from './webhooks/webhooks.controller.js'
 
 @Module({
@@ -27,6 +28,7 @@ import { WebhooksController } from './webhooks/webhooks.controller.js'
         },
         IdClient,
         PaymentsService,
+        WebhookMetrics,
     ],
 })
 export class PayModule {}

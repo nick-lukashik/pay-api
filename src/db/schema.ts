@@ -37,9 +37,15 @@ export const payments = pgTable(
         provider: text('provider').notNull(),
         providerPaymentId: text('provider_payment_id'),
         checkoutUrl: text('checkout_url'),
+        /**
+         * created: no provider checkout yet; creating: one executor creates it
+         * (under the lease below), or an attempt's outcome is unknown (no lease):
+         * the next one looks for it at the provider first.
+         */
         status: text('status', {
             enum: [
                 'created',
+                'creating',
                 'pending',
                 'succeeded',
                 'failed',
@@ -49,7 +55,11 @@ export const payments = pgTable(
             .default('created'),
         idempotencyKey: text('idempotency_key').notNull(),
         fingerprint: text('fingerprint').notNull(),
+        /** provider (a failure webhook) or checkout_lost (found again without its URL). */
         failureReason: text('failure_reason'),
+        /** The executor creating the provider checkout; its answer is written only while this holds. */
+        checkoutLeaseToken: uuid('checkout_lease_token'),
+        checkoutLeaseUntil: at('checkout_lease_until'),
         paidAt: at('paid_at'),
         createdAt: at('created_at').notNull().defaultNow(),
         updatedAt: at('updated_at').notNull().defaultNow(),
@@ -63,8 +73,10 @@ export const payments = pgTable(
 )
 
 /**
- * Every webhook that passed authentication, once per dedupe key; the payload
- * itself is not kept, only its hash and the outcome.
+ * Every webhook that passed authentication, once per dedupe key (the event's
+ * identity). The payload itself is not kept, only its hash and the fact read
+ * from it, so a webhook that came before its payment had the provider id is
+ * applied once it has: received_at and applied_at are separate.
  */
 export const webhookEvents = pgTable(
     'webhook_events',
@@ -73,19 +85,43 @@ export const webhookEvents = pgTable(
         provider: text('provider').notNull(),
         dedupeKey: text('dedupe_key').notNull(),
         payloadSha256: text('payload_sha256').notNull(),
+        /** unmatched: received, waiting for its payment; mismatch and rejected are never applied. */
         outcome: text('outcome', {
             enum: [
                 'processed',
                 'ignored',
                 'unmatched',
                 'mismatch',
-                'invalid',
+                'rejected',
             ],
         }).notNull(),
         paymentId: uuid('payment_id'),
+        /** The fact, verified and normalized: what is applied later. */
+        providerPaymentId: text('provider_payment_id'),
+        paymentStatus: text('payment_status', {
+            enum: [
+                'succeeded',
+                'failed',
+            ],
+        }),
+        /** Minor units (kopecks, cents). */
+        amountMinor: bigint('amount_minor', {
+            mode: 'bigint',
+        }),
+        currency: text('currency', {
+            enum: [
+                'RUB',
+                'USD',
+                'EUR',
+            ],
+        }),
         receivedAt: at('received_at').notNull().defaultNow(),
+        appliedAt: at('applied_at'),
     },
     t => [
         uniqueIndex('webhook_events_dedupe_uq').on(t.provider, t.dedupeKey),
+        index('webhook_events_unmatched_idx')
+            .on(t.provider, t.providerPaymentId)
+            .where(sql`${t.outcome} = 'unmatched'`),
     ],
 )

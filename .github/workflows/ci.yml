@@ -24,6 +24,7 @@ jobs:
             services: postgres,redis,rabbitmq
             # @nick-lukashik/auth and /contracts from GitHub Packages.
             github-packages: true
-            # No image until the Lava merchant account: pay-api is not deployed before it
-            # (without Lava it could only run the test provider, free coins for anyone).
-            publish: false
+            # The image is pushed on master, so integrated tests can run pay-api. No deploy
+            # job until the Lava merchant account: without Lava it could only run the
+            # test provider, free coins for anyone.
+            publish: true

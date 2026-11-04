@@ -68,9 +68,9 @@ const cursor = cursorCodec(
 const CHECKOUT_LEASE = sql`interval '30 seconds'`
 
 /**
- * How long a request waits for another one's provider call before it answers
- * 'creating': under the whole-request budget (10 s, REQUEST_TIMEOUT_MS), since
- * a longer wait reaches the caller as a 504.
+ * How long after it started a request may wait for another one's provider call
+ * before it answers 'creating': under the whole-request budget (10 s,
+ * REQUEST_TIMEOUT_MS), since a longer wait reaches the caller as a 504.
  */
 const CHECKOUT_WAIT_MS = 8_500
 const CHECKOUT_POLL_MS = 250
@@ -129,6 +129,8 @@ export class PaymentsService {
         },
         idempotencyKey: string,
     ) {
+        // From the start of the request: the lookups below use up the same budget.
+        const waitUntil = performance.now() + CHECKOUT_WAIT_MS
         const product = productByKey(input.productKey)
         if (!product)
             throw new AppError('VALIDATION_FAILED', 'Request validation failed', [
@@ -170,10 +172,14 @@ export class PaymentsService {
         const user = await this.users.recipient(userId)
         if (!user || user.status !== 'active') throw new AppError('FORBIDDEN', 'Account not active')
         return this.view(
-            await this.createCheckout(payment.id, {
-                email: user.email,
-                locale: user.locale,
-            }),
+            await this.createCheckout(
+                payment.id,
+                {
+                    email: user.email,
+                    locale: user.locale,
+                },
+                waitUntil,
+            ),
         )
     }
 
@@ -190,8 +196,9 @@ export class PaymentsService {
             email: string
             locale: 'en' | 'ru'
         },
+        waitUntil: number,
     ) {
-        const claim = await this.claimOrWait(id)
+        const claim = await this.claimOrWait(id, waitUntil)
         if (!claim.token) return claim.payment
         let checkout: FoundCheckout
         try {
@@ -224,10 +231,9 @@ export class PaymentsService {
      * usually ends within the wait, so the caller gets the URL. If that executor
      * gives its claim back, the next poll takes it over.
      */
-    private async claimOrWait(id: string) {
-        const deadline = performance.now() + CHECKOUT_WAIT_MS
+    private async claimOrWait(id: string, waitUntil: number) {
         let claim = await this.claimCheckout(id)
-        while (!claim.token && claim.payment.status === 'creating' && performance.now() < deadline) {
+        while (!claim.token && claim.payment.status === 'creating' && performance.now() < waitUntil) {
             await sleep(CHECKOUT_POLL_MS)
             claim = await this.claimCheckout(id)
         }

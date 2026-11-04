@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 
 export const ISSUER = 'https://id.example.test'
@@ -26,7 +27,11 @@ export async function startIdentity() {
     }
     const internalToken = randomBytes(32).toString('hex')
     const users = new Map<string, FakeUser>()
-    const server: Server = createServer((request, response) => {
+    const slow = {
+        /** How long the internal users endpoint takes to answer. */
+        recipientMs: 0,
+    }
+    const server: Server = createServer(async (request, response) => {
         const send = (status: number, body?: unknown) => {
             response.statusCode = status
             response.setHeader('content-type', 'application/json')
@@ -41,6 +46,7 @@ export async function startIdentity() {
         const user = /^\/api\/v1\/internal\/users\/([0-9a-f-]+)$/.exec(request.url ?? '')
         if (user) {
             if (request.headers.authorization !== `Bearer ${internalToken}`) return send(401)
+            await sleep(slow.recipientMs)
             const found = users.get(user[1] ?? '')
             return found ? send(200, found) : send(404)
         }
@@ -56,6 +62,7 @@ export async function startIdentity() {
         jwksUrl: `${url}/.well-known/jwks.json`,
         internalToken,
         users,
+        slow,
         /** An access token of `userId` with `roles`, valid for five minutes. */
         token: (userId: string, roles: string[] = []) =>
             new SignJWT({

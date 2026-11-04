@@ -78,6 +78,7 @@ afterAll(async () => {
 beforeEach(() => {
     provider.during = undefined
     provider.findsWithoutUrl = false
+    identity.slow.recipientMs = 0
 })
 
 async function buyer() {
@@ -174,6 +175,52 @@ describe('one provider checkout per payment', () => {
             checkoutUrl: answer.body.checkoutUrl,
         })
         expect(provider.created - before).toBe(1)
+    })
+
+    it('counts a slow recipient lookup into the wait, and answers creating within the request budget', async () => {
+        const { token, key } = await buyer()
+        const before = provider.created
+        const held = Promise.withResolvers<void>()
+        provider.during = () => held.promise
+        const executor = checkout(token, key)
+        await expect.poll(() => provider.created - before).toBe(1)
+
+        // A lookup under its own 5 s timeout, yet too slow to add a whole wait to.
+        identity.slow.recipientMs = 4_000
+        const started = performance.now()
+        const waiting = await checkout(token, key)
+        const waited = performance.now() - started
+        expect(waiting.status).toBe(200)
+        expect(waiting.body).toMatchObject({
+            status: 'creating',
+            checkoutUrl: null,
+        })
+        expect(waited).toBeGreaterThan(8_000)
+        expect(waited).toBeLessThan(REQUEST_TIMEOUT_MS)
+
+        identity.slow.recipientMs = 0
+        held.resolve()
+        expect((await executor).body.status).toBe('pending')
+    })
+
+    it('still gets the URL of a provider call that ends within the wait, after a slow recipient lookup', async () => {
+        const { token, key } = await buyer()
+        const before = provider.created
+        const held = Promise.withResolvers<void>()
+        provider.during = () => held.promise
+        const executor = checkout(token, key)
+        await expect.poll(() => provider.created - before).toBe(1)
+
+        identity.slow.recipientMs = 2_000
+        const waiting = checkout(token, key)
+        await new Promise(resolve => setTimeout(resolve, 3_000))
+        held.resolve()
+        const answer = await waiting
+        expect(answer.status).toBe(200)
+        expect(answer.body).toMatchObject({
+            status: 'pending',
+            checkoutUrl: (await executor).body.checkoutUrl,
+        })
     })
 
     it('takes over while waiting when the executor gives its claim back', async () => {

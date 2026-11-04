@@ -33,6 +33,12 @@ export const authConfig = registerAs('auth', () => ({
     idInternalToken: env().ID_INTERNAL_TOKEN,
 }))
 
+export const reconciliationConfig = registerAs('reconciliation', () => ({
+    intervalMs: env().RECONCILIATION_INTERVAL_MS,
+    walletApiUrl: env().WALLET_API_URL,
+    walletInternalToken: env().WALLET_INTERNAL_TOKEN,
+}))
+
 export const payConfig = registerAs('pay', () => ({
     provider: env().PAY_PROVIDER,
     idWebUrl: env().ID_WEB_URL,

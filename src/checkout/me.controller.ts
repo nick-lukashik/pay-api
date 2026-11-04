@@ -39,6 +39,13 @@ export class MePaymentsController {
     })
     @ApiOperation({
         summary: 'Start paying for a coin pack; returns the provider checkout URL',
+        description: [
+            'The status of the payment says what to do next.',
+            '`pending`: go to `checkoutUrl`.',
+            '`creating`: another request with this key is still creating the provider checkout (this one waited for it first); `checkoutUrl` is null, retry with the same key.',
+            '`failed`: nobody can pay this checkout: it failed at the provider, or was found again without its URL (`checkout_lost`); `checkoutUrl` is null, start over with a new key.',
+            '`succeeded`: already paid.',
+        ].join('\n\n'),
     })
     @ApiErrors(400, 401, 403, 409)
     checkout(

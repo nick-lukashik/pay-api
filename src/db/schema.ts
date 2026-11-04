@@ -61,6 +61,8 @@ export const payments = pgTable(
         checkoutLeaseToken: uuid('checkout_lease_token'),
         checkoutLeaseUntil: at('checkout_lease_until'),
         paidAt: at('paid_at'),
+        /** When reconciliation saw the pack in wallet-api's ledger; a succeeded payment without it is still checked. */
+        reconciledAt: at('reconciled_at'),
         createdAt: at('created_at').notNull().defaultNow(),
         updatedAt: at('updated_at').notNull().defaultNow(),
     },
@@ -68,6 +70,7 @@ export const payments = pgTable(
         uniqueIndex('payments_user_key_uq').on(t.userId, t.idempotencyKey),
         uniqueIndex('payments_provider_id_uq').on(t.provider, t.providerPaymentId),
         index('payments_user_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
+        index('payments_unreconciled_idx').on(t.id).where(sql`${t.status} = 'succeeded' and ${t.reconciledAt} is null`),
         check('payments_coins_positive', sql`${t.coins} > 0`),
     ],
 )

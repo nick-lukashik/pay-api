@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import { type Currency, paymentSucceededV1 } from '@nick-lukashik/contracts'
-import { and, asc, desc, eq, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, lt, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { productByKey } from '../catalog/catalog.js'
 import { DB, isUniqueViolation } from '../common/database/database.js'
@@ -29,6 +30,29 @@ export const paymentSucceeded = defineEvent(
     paymentSucceededV1.payload,
 )
 
+/**
+ * The event of a paid payment. Its id is the payment's: a payment succeeds
+ * once, so a copy that reconciliation sends again is the same event to the
+ * inbox of every consumer.
+ */
+export const paymentSucceededEvent = (payment: PaymentRow, paidAt: Date) => ({
+    ...paymentSucceeded.create({
+        aggregateId: payment.id,
+        occurredAt: paidAt,
+        payload: {
+            paymentId: payment.id,
+            userId: payment.userId,
+            productKey: payment.productKey,
+            coins: String(payment.coins),
+            amount: payment.amount,
+            currency: payment.currency,
+            provider: payment.provider,
+            paidAt: paidAt.toISOString(),
+        },
+    }),
+    eventId: payment.id,
+})
+
 const cursor = cursorCodec(
     z.object({
         createdAt: z.iso.datetime(),
@@ -42,6 +66,14 @@ const cursor = cursorCodec(
  * executor keeps it and a crashed one frees it.
  */
 const CHECKOUT_LEASE = sql`interval '30 seconds'`
+
+/**
+ * How long a request waits for another one's provider call before it answers
+ * 'creating': under the whole-request budget (10 s, REQUEST_TIMEOUT_MS), since
+ * a longer wait reaches the caller as a 504.
+ */
+const CHECKOUT_WAIT_MS = 8_500
+const CHECKOUT_POLL_MS = 250
 
 /** The order snapshot in minor units; the catalog's prices always parse. */
 const snapshotMinor = (payment: PaymentRow) => {
@@ -82,8 +114,9 @@ export class PaymentsService {
     /**
      * A checkout for one product. The same Idempotency-Key with the same
      * request returns the same payment; with another request it is a 409.
-     * While another request creates the provider checkout, the payment comes
-     * back as 'creating': retry with the same key.
+     * While another request creates the provider checkout, this one waits for
+     * it; if that takes too long the payment comes back as 'creating': retry
+     * with the same key.
      */
     async checkout(
         userId: string,
@@ -155,7 +188,7 @@ export class PaymentsService {
             locale: 'en' | 'ru'
         },
     ) {
-        const claim = await this.claimCheckout(id)
+        const claim = await this.claimOrWait(id)
         if (!claim.token) return claim.payment
         let checkout: FoundCheckout
         try {
@@ -181,6 +214,21 @@ export class PaymentsService {
             throw new AppError('UNAVAILABLE', 'Payment provider unavailable, retry later')
         }
         return this.recordCheckout(id, claim.token, checkout)
+    }
+
+    /**
+     * The claim, polling while another executor holds it: its provider call
+     * usually ends within the wait, so the caller gets the URL. If that executor
+     * gives its claim back, the next poll takes it over.
+     */
+    private async claimOrWait(id: string) {
+        const deadline = performance.now() + CHECKOUT_WAIT_MS
+        let claim = await this.claimCheckout(id)
+        while (!claim.token && claim.payment.status === 'creating' && performance.now() < deadline) {
+            await sleep(CHECKOUT_POLL_MS)
+            claim = await this.claimCheckout(id)
+        }
+        return claim
     }
 
     /** The claim, or the payment as it stands: nothing to create, or another executor holds it. */
@@ -240,8 +288,9 @@ export class PaymentsService {
     /**
      * The provider's answer, compare-and-set on the claim: written only while
      * this executor still holds it, so a late answer never moves a payment back
-     * or replaces another checkout. Webhooks that came before the provider id
-     * are applied in the same transaction.
+     * or replaces another checkout; its one use is the URL a lost checkout was
+     * found without. Webhooks that came before the provider id are applied in
+     * the same transaction.
      */
     private async recordCheckout(id: string, token: string, checkout: FoundCheckout) {
         const recorded = await this.db.transaction(async tx => {
@@ -262,7 +311,15 @@ export class PaymentsService {
                     and(eq(payments.id, id), eq(payments.status, 'creating'), eq(payments.checkoutLeaseToken, token)),
                 )
                 .returning()
-            if (!ready) return undefined
+            if (!ready) {
+                const revived = await this.reviveLostCheckout(tx, id, checkout)
+                return (
+                    revived && {
+                        payment: revived,
+                        outcomes: [],
+                    }
+                )
+            }
             return {
                 payment: ready,
                 outcomes: await this.applyReceived(tx, checkout.providerPaymentId),
@@ -282,6 +339,35 @@ export class PaymentsService {
         for (const outcome of recorded.outcomes) this.webhookMetrics.count(resultOf(outcome))
         this.relay.kick()
         return this.byId(id)
+    }
+
+    /**
+     * The next executor found this invoice without its URL and marked the
+     * payment checkout_lost; this late answer has the URL, so it can be paid
+     * after all. Compare-and-set: anything else that happened to the payment
+     * stands.
+     */
+    private async reviveLostCheckout(tx: Tx, id: string, checkout: FoundCheckout) {
+        if (!checkout.checkoutUrl) return undefined
+        const [revived] = await tx
+            .update(payments)
+            .set({
+                status: 'pending',
+                checkoutUrl: checkout.checkoutUrl,
+                failureReason: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(payments.id, id),
+                    eq(payments.status, 'failed'),
+                    eq(payments.failureReason, 'checkout_lost'),
+                    eq(payments.providerPaymentId, checkout.providerPaymentId),
+                    isNull(payments.checkoutUrl),
+                ),
+            )
+            .returning()
+        return revived
     }
 
     /**
@@ -346,9 +432,11 @@ export class PaymentsService {
      * An authenticated webhook: recorded once by its dedupe key with the fact
      * read from it, and applied in the same transaction. A success that leaves
      * out the amount or the currency is confirmed by the provider's own record
-     * instead. One that finds no payment stays received (unmatched) and is
-     * applied when its payment gets the provider id; a repeated delivery of it
-     * tries again instead of counting as a duplicate.
+     * instead; until that record shows it, the answer is 503 and nothing is
+     * recorded, so the provider's retry asks again. One that finds no payment
+     * stays received (unmatched) and is applied when its payment gets the
+     * provider id; a repeated delivery of it tries again instead of counting as
+     * a duplicate.
      */
     async receive(parsed: ParsedWebhook, payloadSha256: string): Promise<WebhookResult> {
         const result = await this.settle(parsed, payloadSha256)
@@ -364,15 +452,23 @@ export class PaymentsService {
         // Asked once: a delivery already recorded is settled by its stored fact.
         if (fact.outcome === 'succeeded' && incomplete && !(await this.recorded(fact.dedupeKey))) {
             const record = await this.lookup(fact.providerPaymentId)
-            if (record === 'open')
-                throw new AppError('UNAVAILABLE', 'The provider has not settled the payment yet, retry later')
-            if (record?.outcome !== 'succeeded' || record.amountMinor === undefined || record.currency === undefined)
-                return this.reject(
-                    fact.dedupeKey,
-                    payloadSha256,
-                    'the provider does not confirm the success',
-                    fact.providerPaymentId,
+            if (
+                record === undefined
+                || record === 'open'
+                || record.outcome !== 'succeeded'
+                || record.amountMinor === undefined
+                || record.currency === undefined
+            ) {
+                // Its record can lag behind its webhook: rejecting now would lose a real payment for good.
+                this.logger.warn(
+                    {
+                        providerPaymentId: fact.providerPaymentId,
+                        record: record === undefined || record === 'open' ? (record ?? 'none') : record.outcome,
+                    },
+                    'The provider does not confirm the success yet: asked to retry',
                 )
+                throw new AppError('UNAVAILABLE', 'The provider has not settled the payment yet, retry later')
+            }
             fact = {
                 ...record,
                 dedupeKey: fact.dedupeKey,
@@ -436,12 +532,7 @@ export class PaymentsService {
     }
 
     /** Recorded, never applied. */
-    private async reject(
-        dedupeKey: string,
-        payloadSha256: string,
-        reason: string,
-        providerPaymentId?: string,
-    ): Promise<WebhookResult> {
+    private async reject(dedupeKey: string, payloadSha256: string, reason: string): Promise<WebhookResult> {
         const [recorded] = await this.db
             .insert(webhookEvents)
             .values({
@@ -449,7 +540,6 @@ export class PaymentsService {
                 dedupeKey,
                 payloadSha256,
                 outcome: 'rejected',
-                providerPaymentId,
             })
             .onConflictDoNothing()
             .returning({
@@ -565,22 +655,7 @@ export class PaymentsService {
                 updatedAt: paidAt,
             })
             .where(eq(payments.id, payment.id))
-        await enqueueEvent(
-            tx,
-            paymentSucceeded.create({
-                aggregateId: payment.id,
-                payload: {
-                    paymentId: payment.id,
-                    userId: payment.userId,
-                    productKey: payment.productKey,
-                    coins: String(payment.coins),
-                    amount: payment.amount,
-                    currency: payment.currency,
-                    provider: payment.provider,
-                    paidAt: paidAt.toISOString(),
-                },
-            }),
-        )
+        await enqueueEvent(tx, paymentSucceededEvent(payment, paidAt))
         return {
             outcome: 'processed',
             paymentId: payment.id,

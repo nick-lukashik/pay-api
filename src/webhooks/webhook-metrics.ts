@@ -19,7 +19,7 @@ export class WebhookMetrics {
     constructor(metrics: Metrics) {
         this.results = metrics.counter({
             name: 'payment_webhooks_total',
-            help: 'Provider webhooks by result: applied, duplicate (seen before, or the payment already final), unmatched (no payment yet; counted again when applied later), mismatch (money differs from the order), rejected (bad credential, malformed, unconfirmed).',
+            help: 'Provider webhooks by result: applied, duplicate (seen before, or the payment already final), unmatched (no payment yet; counted again when applied later), mismatch (money differs from the order), rejected (bad credential, malformed).',
             labelNames: [
                 'result',
             ],

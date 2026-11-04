@@ -28,7 +28,7 @@
         "infra:up": "docker compose up -d --wait",
         "infra:down": "docker compose down",
         "infra:reset": "docker compose down --volumes",
-        "env:local": "node -e \"fs.existsSync('.env')?console.log('.env already exists'):(fs.copyFileSync('.env.example','.env',fs.constants.COPYFILE_EXCL),console.log('created .env: fill ID_INTERNAL_TOKEN'))\""
+        "env:local": "node -e \"fs.existsSync('.env')?console.log('.env already exists'):(fs.copyFileSync('.env.example','.env',fs.constants.COPYFILE_EXCL),console.log('created .env: fill ID_INTERNAL_TOKEN and WALLET_INTERNAL_TOKEN'))\""
     },
     "dependencies": {
         "@nestjs/common": "12.3.2",

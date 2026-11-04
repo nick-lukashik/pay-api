@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { payments } from '../src/db/schema.js'
+import { payments, webhookEvents } from '../src/db/schema.js'
 import { startApp, type TestApp } from './harness.js'
 import { type Identity, startIdentity } from './identity.js'
 import { type LavaApi, startLavaApi } from './lava-api.js'
@@ -115,6 +115,11 @@ const webhooks = (result: string) =>
     t.metric('payment_webhooks_total', {
         result,
     })
+
+const recordedWebhooks = async (contractId: string) => {
+    const rows = await t.db.select().from(webhookEvents).where(eq(webhookEvents.providerPaymentId, contractId))
+    return rows.length
+}
 
 describe('Lava checkout', () => {
     it('sends the offer, the currency and our payment id', async () => {
@@ -367,20 +372,58 @@ describe('Lava money checks', () => {
         expect(response.body.status).toBe('applied')
     })
 
-    it('rejects a success that Lava does not confirm', async () => {
-        const unknown = await pendingPayment()
-        const response = await webhook(SECRET, success(unknown.contractId, {})).expect(200)
-        expect(response.body.status).toBe('rejected')
+    it('asks Lava to retry a success its own record does not show yet, then applies it', async () => {
+        const contractId = randomUUID()
+        const payment = await pendingPayment(contractId)
+        const body = success(contractId, {})
+        const rejected = await webhooks('rejected')
 
+        // No such invoice at Lava yet (404): nothing is recorded, so the retry is not a duplicate.
+        await webhook(SECRET, body).expect(503)
+        expect(await recordedWebhooks(contractId)).toBe(0)
+        expect((await webhooks('rejected')) - rejected).toBe(0)
+        expect(await statusOf(payment.id)).toBe('pending')
+
+        lava.invoices.set(contractId, {
+            id: contractId,
+            status: 'COMPLETED',
+            amount: 500,
+            currency: 'RUB',
+        })
+        expect((await webhook(SECRET, body).expect(200)).body.status).toBe('applied')
+        expect(await statusOf(payment.id)).toBe('succeeded')
+        expect(await credits(payment.id)).toBe(1)
+    })
+
+    it('asks Lava to retry a success its record contradicts or leaves without the money', async () => {
         const failed = await pendingPayment(
             lava.add({
                 status: 'FAILED',
                 currency: 'RUB',
             }),
         )
-        expect((await webhook(SECRET, success(failed.contractId, {})).expect(200)).body.status).toBe('rejected')
-        expect(await statusOf(unknown.id)).toBe('pending')
+        await webhook(SECRET, success(failed.contractId, {})).expect(503)
+        expect(await recordedWebhooks(failed.contractId)).toBe(0)
         expect(await statusOf(failed.id)).toBe('pending')
+
+        const noCurrency = await pendingPayment(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 500,
+                currency: 'XXX',
+            }),
+        )
+        await webhook(SECRET, success(noCurrency.contractId, {})).expect(503)
+        expect(await recordedWebhooks(noCurrency.contractId)).toBe(0)
+        expect(await statusOf(noCurrency.id)).toBe('pending')
+
+        // Lava's record catches up: the same event pays.
+        Object.assign(lava.invoices.get(failed.contractId) ?? {}, {
+            status: 'COMPLETED',
+            amount: 500,
+        })
+        expect((await webhook(SECRET, success(failed.contractId, {})).expect(200)).body.status).toBe('applied')
+        expect(await statusOf(failed.id)).toBe('succeeded')
     })
 
     it('asks Lava to retry while its invoice is not settled yet', async () => {

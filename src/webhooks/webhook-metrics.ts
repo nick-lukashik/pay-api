@@ -7,6 +7,7 @@ const RESULTS = [
     'unmatched',
     'mismatch',
     'rejected',
+    'deferred',
 ] as const
 
 /** What became of a provider webhook: the `result` label of payment_webhooks_total. */
@@ -19,7 +20,7 @@ export class WebhookMetrics {
     constructor(metrics: Metrics) {
         this.results = metrics.counter({
             name: 'payment_webhooks_total',
-            help: 'Provider webhooks by result: applied, duplicate (seen before, or the payment already final), unmatched (no payment yet; counted again when applied later), mismatch (money differs from the order), rejected (bad credential, malformed).',
+            help: 'Provider webhooks by result: applied, duplicate (seen before, or the payment already final), unmatched (no payment yet; counted again when applied later), mismatch (money differs from the order), rejected (bad credential, malformed), deferred (a success the provider has not confirmed yet: answered 503 and not recorded; counted on every try).',
             labelNames: [
                 'result',
             ],

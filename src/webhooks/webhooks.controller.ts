@@ -23,8 +23,8 @@ import { WebhookMetrics } from './webhook-metrics.js'
  * service (hooks.nick-lukashik.com). The credential is checked before the
  * payload is read; each fact is recorded once (dedupe key) and applied in the
  * same transaction, or later when its payment gets the provider id. 200 once
- * recorded, so the provider stops retrying; 503 when the provider must be
- * asked and cannot be, so it retries.
+ * recorded, so the provider stops retrying; 503 when its record does not
+ * confirm a success yet or it cannot be asked (`deferred`), so it retries.
  */
 @ApiExcludeController()
 @Controller({

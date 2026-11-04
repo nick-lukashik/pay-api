@@ -436,10 +436,10 @@ export class PaymentsService {
      * read from it, and applied in the same transaction. A success that leaves
      * out the amount or the currency is confirmed by the provider's own record
      * instead; until that record shows it, the answer is 503 and nothing is
-     * recorded, so the provider's retry asks again. One that finds no payment
-     * stays received (unmatched) and is applied when its payment gets the
-     * provider id; a repeated delivery of it tries again instead of counting as
-     * a duplicate.
+     * recorded, only counted as deferred and logged, so the provider's retry
+     * asks again. One that finds no payment stays received (unmatched) and is
+     * applied when its payment gets the provider id; a repeated delivery of it
+     * tries again instead of counting as a duplicate.
      */
     async receive(parsed: ParsedWebhook, payloadSha256: string): Promise<WebhookResult> {
         const result = await this.settle(parsed, payloadSha256)
@@ -463,6 +463,7 @@ export class PaymentsService {
                 || record.currency === undefined
             ) {
                 // Its record can lag behind its webhook: rejecting now would lose a real payment for good.
+                this.webhookMetrics.count('deferred')
                 this.logger.warn(
                     {
                         providerPaymentId: fact.providerPaymentId,
@@ -574,11 +575,13 @@ export class PaymentsService {
         try {
             return await this.provider.lookup(providerPaymentId)
         } catch (error) {
+            this.webhookMetrics.count('deferred')
             this.logger.warn(
                 {
+                    providerPaymentId,
                     err: (error as Error).message,
                 },
-                'Provider lookup failed',
+                'Provider lookup failed: asked to retry',
             )
             throw new AppError('UNAVAILABLE', 'Payment provider unavailable, retry later')
         }

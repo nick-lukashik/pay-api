@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { Logger } from '@nestjs/common'
 import { eq, sql } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { payments, webhookEvents } from '../src/db/schema.js'
 import { ReconciliationService } from '../src/reconciliation/reconciliation.service.js'
 import { startApp, type TestApp } from './harness.js'
@@ -421,6 +422,72 @@ describe('Lava money checks', () => {
         expect((await webhook(SECRET, body).expect(200)).body.status).toBe('applied')
         expect(await statusOf(payment.id)).toBe('succeeded')
         expect(await credits(payment.id)).toBe(1)
+    })
+
+    it('counts a deferred success on every try, and logs its provider id, not its payload', async () => {
+        const contractId = randomUUID()
+        const payment = await pendingPayment(contractId)
+        const body = success(contractId, {
+            buyer: 'nobody-may-log-this@example.com',
+        })
+        const warn = vi.spyOn(Logger.prototype, 'warn')
+        const deferred = await webhooks('deferred')
+
+        await webhook(SECRET, body).expect(503)
+        expect((await webhooks('deferred')) - deferred).toBe(1)
+        expect(warn).toHaveBeenCalledWith(
+            expect.objectContaining({
+                providerPaymentId: contractId,
+            }),
+            expect.any(String),
+        )
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('nobody-may-log-this')
+        expect(await recordedWebhooks(contractId)).toBe(0)
+
+        await webhook(SECRET, body).expect(503)
+        expect((await webhooks('deferred')) - deferred).toBe(2)
+
+        lava.invoices.set(contractId, {
+            id: contractId,
+            status: 'COMPLETED',
+            amount: 500,
+            currency: 'RUB',
+        })
+        const applied = await webhooks('applied')
+        expect((await webhook(SECRET, body).expect(200)).body.status).toBe('applied')
+        expect((await webhooks('applied')) - applied).toBe(1)
+        expect((await webhooks('deferred')) - deferred).toBe(2)
+        expect(await statusOf(payment.id)).toBe('succeeded')
+    })
+
+    it('counts as deferred a success it cannot ask Lava about, and keeps the 503', async () => {
+        const contractId = lava.add({
+            status: 'COMPLETED',
+            amount: 500,
+            currency: 'RUB',
+        })
+        const payment = await pendingPayment(contractId)
+        const body = success(contractId, {})
+        const warn = vi.spyOn(Logger.prototype, 'warn')
+        const deferred = await webhooks('deferred')
+
+        lava.answer = 'unavailable'
+        try {
+            await webhook(SECRET, body).expect(503)
+        } finally {
+            lava.answer = 'ok'
+        }
+        expect((await webhooks('deferred')) - deferred).toBe(1)
+        expect(warn).toHaveBeenCalledWith(
+            expect.objectContaining({
+                providerPaymentId: contractId,
+            }),
+            expect.any(String),
+        )
+        expect(await recordedWebhooks(contractId)).toBe(0)
+        expect(await statusOf(payment.id)).toBe('pending')
+
+        expect((await webhook(SECRET, body).expect(200)).body.status).toBe('applied')
     })
 
     it('asks Lava to retry a success its record contradicts or leaves without the money', async () => {

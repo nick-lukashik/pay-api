@@ -63,6 +63,8 @@ export const payments = pgTable(
         paidAt: at('paid_at'),
         /** When reconciliation saw the pack in wallet-api's ledger; a succeeded payment without it is still checked. */
         reconciledAt: at('reconciled_at'),
+        /** When the periodic job last asked the provider about this pending payment; the longest ago goes first. */
+        providerCheckedAt: at('provider_checked_at'),
         createdAt: at('created_at').notNull().defaultNow(),
         updatedAt: at('updated_at').notNull().defaultNow(),
     },
@@ -71,6 +73,9 @@ export const payments = pgTable(
         uniqueIndex('payments_provider_id_uq').on(t.provider, t.providerPaymentId),
         index('payments_user_idx').on(t.userId, t.createdAt.desc(), t.id.desc()),
         index('payments_unreconciled_idx').on(t.id).where(sql`${t.status} = 'succeeded' and ${t.reconciledAt} is null`),
+        index('payments_unconfirmed_idx')
+            .on(t.providerCheckedAt.asc().nullsFirst(), t.id)
+            .where(sql`${t.status} = 'pending' and ${t.providerPaymentId} is not null`),
         check('payments_coins_positive', sql`${t.coins} > 0`),
     ],
 )
@@ -79,7 +84,8 @@ export const payments = pgTable(
  * Every webhook that passed authentication, once per dedupe key (the event's
  * identity). The payload itself is not kept, only its hash and the fact read
  * from it, so a webhook that came before its payment had the provider id is
- * applied once it has: received_at and applied_at are separate.
+ * applied once it has: received_at and applied_at are separate. A fact the
+ * periodic job read from the provider's record is kept the same way (`sync:`).
  */
 export const webhookEvents = pgTable(
     'webhook_events',

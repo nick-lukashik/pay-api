@@ -65,7 +65,11 @@ export abstract class PaymentProvider {
      * cannot tell.
      */
     abstract findCheckout(payment: PaymentRow): Promise<FoundCheckout | null>
-    /** Asked when a webhook leaves out what a success needs; throws when the provider cannot be asked. */
+    /**
+     * Asked when a webhook leaves out what a success needs, and by the periodic
+     * job about a payment whose webhook never came; throws when the provider
+     * cannot be asked.
+     */
     abstract lookup(providerPaymentId: string): Promise<ProviderRecord>
     /** Credential of an incoming webhook, checked before the payload is trusted. */
     abstract authenticate(headers: Record<string, string | string[] | undefined>): boolean

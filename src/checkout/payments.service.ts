@@ -84,6 +84,9 @@ const snapshotMinor = (payment: PaymentRow) => {
 
 export type FactOutcome = 'processed' | 'ignored' | 'unmatched' | 'mismatch'
 
+/** What the provider's record of a pending payment came to; see `askProvider`. */
+export type ProviderAnswer = 'applied' | 'open' | 'missing' | 'mismatch'
+
 const resultOf = (outcome: FactOutcome): WebhookResult =>
     outcome === 'processed' ? 'applied' : outcome === 'ignored' ? 'duplicate' : outcome
 
@@ -474,37 +477,87 @@ export class PaymentsService {
                 dedupeKey: fact.dedupeKey,
             }
         }
-        const verified = fact
+        return this.recordFact(fact, payloadSha256)
+    }
+
+    /** A verified fact: recorded once by its dedupe key, and applied in the same transaction. */
+    private recordFact(fact: ProviderFact, payloadSha256: string): Promise<WebhookResult> {
         return this.db.transaction(async tx => {
-            await this.lockProviderPayment(tx, verified.providerPaymentId)
+            await this.lockProviderPayment(tx, fact.providerPaymentId)
             const [inserted] = await tx
                 .insert(webhookEvents)
                 .values({
                     provider: this.provider.name,
-                    dedupeKey: verified.dedupeKey,
+                    dedupeKey: fact.dedupeKey,
                     payloadSha256,
                     outcome: 'unmatched',
-                    providerPaymentId: verified.providerPaymentId,
-                    paymentStatus: verified.outcome,
-                    amountMinor: verified.amountMinor ?? null,
-                    currency: verified.currency ?? null,
+                    providerPaymentId: fact.providerPaymentId,
+                    paymentStatus: fact.outcome,
+                    amountMinor: fact.amountMinor ?? null,
+                    currency: fact.currency ?? null,
                 })
                 .onConflictDoNothing()
                 .returning()
-            const event = inserted ?? (await this.unapplied(tx, verified.dedupeKey))
+            const event = inserted ?? (await this.unapplied(tx, fact.dedupeKey))
             if (!event) return 'duplicate'
             return resultOf(await this.applyRecorded(tx, event))
         })
     }
 
+    /** What became of the fact recorded under this key; undefined when there is none. */
     private async recorded(dedupeKey: string) {
         const [row] = await this.db
             .select({
-                id: webhookEvents.id,
+                outcome: webhookEvents.outcome,
             })
             .from(webhookEvents)
             .where(and(eq(webhookEvents.provider, this.provider.name), eq(webhookEvents.dedupeKey, dedupeKey)))
-        return Boolean(row)
+        return row?.outcome
+    }
+
+    /**
+     * Asks the provider about a pending payment whose webhook never came. A fact
+     * takes the path of a webhook, under a key of the payment and the outcome, so
+     * it is recorded once however often the payment is asked about, and a mismatch
+     * stays one: the same answer again counts, and changes nothing. A success
+     * without the money is not settled yet, as for a webhook: its record can lag,
+     * and recording it now would lose a real payment for good. Returns undefined
+     * when another path settled the payment meanwhile. Throws when the provider
+     * cannot be asked, with nothing changed.
+     */
+    async askProvider(payment: PaymentRow): Promise<ProviderAnswer | undefined> {
+        const { id, providerPaymentId } = payment
+        if (!providerPaymentId) throw new Error(`payment ${id} has no provider id`)
+        const record = await this.provider.lookup(providerPaymentId)
+        if (record === undefined) return 'missing'
+        if (record === 'open') return 'open'
+        if (record.outcome === 'succeeded' && (record.amountMinor === undefined || record.currency === undefined)) {
+            this.logger.warn(
+                {
+                    paymentId: id,
+                    providerPaymentId,
+                },
+                'The provider shows a success without the money: asked again next round',
+            )
+            return 'open'
+        }
+        const fact = {
+            ...record,
+            providerPaymentId,
+            dedupeKey: `sync:${id}:${record.outcome}`,
+        }
+        // No payload here: the adapter keeps its format. The hash stands for the fact.
+        const sha256 = createHash('sha256')
+            .update(`${fact.dedupeKey}|${fact.amountMinor ?? ''}|${fact.currency ?? ''}`)
+            .digest('hex')
+        const result = await this.recordFact(fact, sha256)
+        if (result === 'applied') {
+            this.relay.kick()
+            return 'applied'
+        }
+        if (result === 'mismatch') return 'mismatch'
+        if (result === 'duplicate' && (await this.recorded(fact.dedupeKey)) === 'mismatch') return 'mismatch'
+        return undefined
     }
 
     /** The earlier delivery of this event, when it still waits for its payment. */

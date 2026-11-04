@@ -85,6 +85,7 @@ export function providerContract(name: string, start: () => Promise<ContractSubj
             checkoutLeaseUntil: null,
             paidAt: null,
             reconciledAt: null,
+            providerCheckedAt: null,
             createdAt: new Date(),
             updatedAt: new Date(),
         })

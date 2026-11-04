@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { payments, webhookEvents } from '../src/db/schema.js'
+import { ReconciliationService } from '../src/reconciliation/reconciliation.service.js'
 import { startApp, type TestApp } from './harness.js'
 import { type Identity, startIdentity } from './identity.js'
 import { type LavaApi, startLavaApi } from './lava-api.js'
@@ -482,5 +483,114 @@ describe('Lava money checks', () => {
             hello: 'world',
         }).expect(200)
         expect(invalid.body.status).toBe('rejected')
+    })
+})
+
+describe('Lava payments whose webhook never came', () => {
+    /** A payment past the 10 minutes, whose invoice is `contractId`. */
+    const unconfirmed = async (contractId: string) => {
+        const payment = await pendingPayment(contractId)
+        await t.db
+            .update(payments)
+            .set({
+                createdAt: sql`now() - interval '11 minutes'`,
+            })
+            .where(eq(payments.id, payment.id))
+        return payment
+    }
+
+    const round = () => t.app.get(ReconciliationService).round()
+
+    const sync = (result: string) =>
+        t.metric('payment_provider_sync_total', {
+            result,
+        })
+
+    it('pays by the record of Lava, and a late webhook is a duplicate', async () => {
+        const payment = await unconfirmed(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 500,
+                currency: 'RUB',
+            }),
+        )
+        const applied = await sync('applied')
+        await round()
+        expect(await statusOf(payment.id)).toBe('succeeded')
+        expect((await sync('applied')) - applied).toBe(1)
+        expect(await credits(payment.id)).toBe(1)
+
+        const late = await webhook(
+            SECRET,
+            success(payment.contractId, {
+                amount: 500,
+                currency: 'RUB',
+            }),
+        ).expect(200)
+        expect(late.body.status).toBe('duplicate')
+        expect(await credits(payment.id)).toBe(1)
+    })
+
+    it('does not pay when the record of Lava shows other money', async () => {
+        const payment = await unconfirmed(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 499.99,
+                currency: 'RUB',
+            }),
+        )
+        const mismatch = await sync('mismatch')
+        await round()
+        expect(await statusOf(payment.id)).toBe('pending')
+        expect((await sync('mismatch')) - mismatch).toBe(1)
+        expect(await credits(payment.id)).toBe(0)
+    })
+
+    it('fails on a failed invoice, and changes nothing on an open one or a missing one', async () => {
+        const failed = await unconfirmed(
+            lava.add({
+                status: 'FAILED',
+                currency: 'RUB',
+            }),
+        )
+        const open = await unconfirmed(
+            lava.add({
+                status: 'IN_PROGRESS',
+                currency: 'RUB',
+            }),
+        )
+        const missing = await unconfirmed(`c-${randomUUID()}`)
+        const before = {
+            open: await sync('open'),
+            missing: await sync('missing'),
+        }
+        await round()
+        expect(await statusOf(failed.id)).toBe('failed')
+        expect(await statusOf(open.id)).toBe('pending')
+        expect(await statusOf(missing.id)).toBe('pending')
+        expect((await sync('open')) - before.open).toBe(1)
+        expect((await sync('missing')) - before.missing).toBe(1)
+    })
+
+    it('changes nothing and counts an error while Lava is down', async () => {
+        const payment = await unconfirmed(
+            lava.add({
+                status: 'COMPLETED',
+                amount: 500,
+                currency: 'RUB',
+            }),
+        )
+        const errors = await sync('error')
+        lava.answer = 'unavailable'
+        try {
+            await round()
+        } finally {
+            lava.answer = 'ok'
+        }
+        expect(await statusOf(payment.id)).toBe('pending')
+        expect(await sync('error')).toBeGreaterThan(errors)
+
+        await round()
+        expect(await statusOf(payment.id)).toBe('succeeded')
     })
 })

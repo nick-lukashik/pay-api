@@ -13,6 +13,7 @@ Built from [`nest-example`](https://github.com/nick-lukashik/nest-example): Post
 - **Checkout is idempotent per user.** `Idempotency-Key` is required: the same key and request return the same payment, another request gets 409.
 - **One provider checkout per payment.** One request at a time creates it, under a lease on the payment (`created` → `creating` → `pending`). Others wait for it for up to 8.5 s, under the 10 s request budget, and only then answer `creating`. An attempt with an unknown outcome looks for its checkout before creating one. One found again without its URL becomes `failed` (`checkout_lost`), unless the late answer with that URL still arrives.
 - **Every paid payment ends up in the ledger.** See [Reconciliation](#reconciliation).
+- **A payment whose webhook never came is still noticed.** See [Provider sync](#provider-sync).
 
 ## API
 
@@ -43,6 +44,18 @@ A paid payment that never reached the ledger would be paid without coins, so a j
 
 An advisory lock keeps a round to one pod at a time. Metrics: `payment_reconciliation_total{result="ok|republished|error"}` (`error` counts failed batches, the others payments) and `payments_unreconciled`, the payments past the 5 minutes without `reconciled_at`.
 
+## Provider sync
+
+A webhook can get lost, so the same job also asks the provider. After the ledger, each round takes up to 50 pending payments of the active provider with a provider id, from 10 minutes to 7 days old, those asked longest ago first, and calls `lookup` for each, outside any transaction. The lock keeps two pods from taking the same batch.
+
+- **A fact** takes the path of a webhook: it is recorded once in `webhook_events` under `sync:<payment id>:<outcome>` and applied under the payment's row lock, with the same exact amount and currency checks. A webhook that comes later is a duplicate.
+- **A mismatch** is recorded once, and the payment stays pending. Later rounds count it again, and a record corrected later does not pay it: someone has to look.
+- **A success without the money** counts as `open`, as the record can lag. Nothing is recorded, and the next round asks again.
+- **`open`, or no record at the provider:** nothing changes.
+- **The provider cannot be asked:** nothing changes for that payment, the others go on, and a later round asks again.
+
+Metrics: `payment_provider_sync_total{result="applied|open|missing|mismatch|error"}`, per lookup, and `payments_unconfirmed`, the payments in that window. Checkouts nobody paid stay in it, so watch its trend rather than its value.
+
 ## Providers (`PAY_PROVIDER`)
 
 The core knows only `PaymentProvider` (`src/providers/provider.ts`). `PAY_PROVIDER` picks one adapter from the registry (`src/providers/registry.ts`), and the service stops at startup when that adapter's variables are invalid. The variables of the others are not read.
@@ -50,9 +63,15 @@ The core knows only `PaymentProvider` (`src/providers/provider.ts`). `PAY_PROVID
 - **`fake`.** The checkout URL is id-web's `/payments/fake/<id>` (`ID_WEB_URL`). It refuses to start with `NODE_ENV=production`, unless `PAY_ALLOW_FAKE=true` (stage).
 - **`lava`.** lava.top: `POST /api/v3/invoice` with the offer of each pack (`LAVA_OFFER_COINS_*`), and webhooks authenticated by `LAVA_WEBHOOK_SECRET`, retried by Lava 19 times over about 5 hours. Not yet checked against a merchant account. The offers, the sandbox and the status values are assumptions from Lava's OpenAPI 1.22.0, to verify before real money.
 
+Compared with the provider's own record: the outcome, the amount and the currency of a pending payment with a provider id, from 10 minutes to 7 days after it was created, and of a webhook's success that leaves out the money.
+
 Not yet:
-- expiring payments that stay pending;
-- refunds and chargebacks.
+- comparing a pending payment older than 7 days, and expiring it: it stays pending;
+- comparing a `created` or `creating` payment: its checkout is looked for only when the buyer retries;
+- comparing a `failed` payment: a later success reaches it only by webhook;
+- comparing a `succeeded` payment: refunds and chargebacks are not handled;
+- comparing payments of a provider that is no longer the active one;
+- comparing the provider's reports and payouts with ours.
 
 ## Adding a provider
 

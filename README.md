@@ -59,6 +59,7 @@ Not yet:
 1. **An adapter file**, `src/providers/<name>.provider.ts`: a `PaymentProvider` whose `name` is `<name>`, and its env block, a Zod object of its own variables. Anything of the provider stays in this file, such as its offers per product of the catalog.
 2. **One line in the registry**, `src/providers/registry.ts`.
 3. **The env block in `.env.example`.**
+4. **The contract suite**, `test/provider-contract.ts`, run for the adapter from `test/provider-contract.int.test.ts` against a stand-in of the provider. It pins what the service relies on.
 
 Its webhooks then arrive at `POST /webhooks/<name>`, and nothing else in the core changes.
 

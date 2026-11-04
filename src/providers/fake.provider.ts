@@ -21,29 +21,34 @@ export const fakeEnv = baseEnvSchema
         message: 'the fake provider gives coins without money: in production only with PAY_ALLOW_FAKE=true (stage)',
     })
 
+const ID_PREFIX = 'fake_'
+
 /**
  * No money: the checkout page is id-web's `/payments/fake/<id>`, which
  * confirms through `POST /me/payments/:id/fake-complete`. Local runs and stage only.
  */
 export class FakeProvider extends PaymentProvider {
     readonly name = 'fake'
+    /** The checkouts this process made. */
+    private readonly made = new Set<string>()
 
     constructor(private readonly env: z.output<typeof fakeEnv>) {
         super()
     }
 
     async createCheckout({ payment }: CheckoutInput) {
+        this.made.add(payment.id)
         return this.checkoutOf(payment)
     }
 
-    /** The checkout depends on the payment only: the same one again. */
+    /** One another pod made is not found, and creating it gives the same one: it depends on the payment only. */
     async findCheckout(payment: PaymentRow) {
-        return this.checkoutOf(payment)
+        return this.made.has(payment.id) ? this.checkoutOf(payment) : null
     }
 
-    /** Confirmed through fake-complete only. */
-    async lookup() {
-        return undefined
+    /** Open for any checkout of this adapter: it knows no outcome, only fake-complete confirms. */
+    async lookup(providerPaymentId: string) {
+        return providerPaymentId.startsWith(ID_PREFIX) ? ('open' as const) : undefined
     }
 
     /** The fake provider has no webhooks. */
@@ -59,7 +64,7 @@ export class FakeProvider extends PaymentProvider {
 
     private checkoutOf(payment: PaymentRow) {
         return {
-            providerPaymentId: `fake_${payment.id}`,
+            providerPaymentId: `${ID_PREFIX}${payment.id}`,
             checkoutUrl: `${this.env.ID_WEB_URL}/payments/fake/${payment.id}`,
         }
     }

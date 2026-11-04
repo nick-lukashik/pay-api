@@ -14,4 +14,4 @@ pay-api: catalog, checkout, providers (`fake`, `lava`), webhooks. Built from nes
 
 ## Adding a provider
 
-A new `src/providers/<name>.provider.ts` (the adapter, `name` equal to `<name>`, and its env block), one line in `src/providers/registry.ts`, its variables in `.env.example`, a row in the README, and its webhook tests: bad credential, duplicate, mismatch, unknown. `POST /webhooks/:provider` answers 404 under any other name than the active provider's.
+A new `src/providers/<name>.provider.ts` (the adapter, `name` equal to `<name>`, and its env block), one line in `src/providers/registry.ts`, its variables in `.env.example`, a row in the README, a run of the contract suite (`test/provider-contract.ts`) against a stand-in of the provider, and its webhook tests: bad credential, duplicate, mismatch, unknown. `POST /webhooks/:provider` answers 404 under any other name than the active provider's.

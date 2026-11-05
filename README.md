@@ -2,6 +2,8 @@
 
 Payments of the nick-lukashik platform: a catalog of coin packs, checkout through a payment provider, provider webhooks. A confirmed payment becomes `pay.payment.succeeded.v1`, and wallet-api credits the pack; a reconciliation job checks that it did.
 
+**Not live yet.** pay-api is not deployed and payments are off in prod. No provider is chosen, and the `lava` adapter is frozen. The rest of this README describes how the service works once it runs.
+
 Built from [`nest-example`](https://github.com/nick-lukashik/nest-example): Postgres, RabbitMQ outbox. Design: [`.github/docs/identity.md`](https://github.com/nick-lukashik/.github/blob/master/docs/identity.md). The provider contract is ported from the previous platform's `payments-backend`.
 
 ## Rules of money
@@ -17,13 +19,13 @@ Built from [`nest-example`](https://github.com/nick-lukashik/nest-example): Post
 
 ## API
 
-| Route                                                                     | Who                                 | What                                                                                                              |
-| ------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/catalog`                                                     | anyone                              | The coin packs and their prices in RUB, USD and EUR                                                               |
-| `POST /api/v1/me/checkout` `{ productKey, currency }` + `Idempotency-Key` | access token                        | `{ id, status, checkoutUrl, ... }`, see below                                                                     |
-| `GET /api/v1/me/payments`, `GET /api/v1/me/payments/:id`                  | access token                        | The caller's payments                                                                                             |
-| `POST /api/v1/me/payments/:id/fake-complete`                              | access token, fake provider only    | Confirms without money (local runs, stage)                                                                        |
-| `POST /webhooks/:provider`                                                | the active provider, its credential | The only public route, `hooks.nick-lukashik.com/webhooks/*`; 404 unless `:provider` is the active provider's name |
+| Route                                                                     | Who                                 | What                                                                                                                                 |
+| ------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/v1/catalog`                                                     | anyone                              | The coin packs and their prices in RUB, USD and EUR                                                                                  |
+| `POST /api/v1/me/checkout` `{ productKey, currency }` + `Idempotency-Key` | access token                        | `{ id, status, checkoutUrl, ... }`, see below                                                                                        |
+| `GET /api/v1/me/payments`, `GET /api/v1/me/payments/:id`                  | access token                        | The caller's payments                                                                                                                |
+| `POST /api/v1/me/payments/:id/fake-complete`                              | access token, fake provider only    | Confirms without money (local runs, stage)                                                                                           |
+| `POST /webhooks/:provider`                                                | the active provider, its credential | The only public route, `hooks.nick-lukashik.com/webhooks/*` (not deployed yet); 404 unless `:provider` is the active provider's name |
 
 What the status of a checkout answer means:
 
@@ -61,7 +63,7 @@ Metrics: `payment_provider_sync_total{result="applied|open|missing|mismatch|erro
 The core knows only `PaymentProvider` (`src/providers/provider.ts`). `PAY_PROVIDER` picks one adapter from the registry (`src/providers/registry.ts`), and the service stops at startup when that adapter's variables are invalid. The variables of the others are not read.
 
 - **`fake`.** The checkout URL is id-web's `/payments/fake/<id>` (`ID_WEB_URL`). It refuses to start with `NODE_ENV=production`, unless `PAY_ALLOW_FAKE=true` (stage).
-- **`lava`.** lava.top: `POST /api/v3/invoice` with the offer of each pack (`LAVA_OFFER_COINS_*`), and webhooks authenticated by `LAVA_WEBHOOK_SECRET`, retried by Lava 19 times over about 5 hours. Not yet checked against a merchant account. The offers, the sandbox and the status values are assumptions from Lava's OpenAPI 1.22.0, to verify before real money.
+- **`lava`.** Frozen: no provider is chosen. lava.top: `POST /api/v3/invoice` with the offer of each pack (`LAVA_OFFER_COINS_*`), and webhooks authenticated by `LAVA_WEBHOOK_SECRET`, retried by Lava 19 times over about 5 hours. Not yet checked against a merchant account. The offers, the sandbox and the status values are assumptions from Lava's OpenAPI 1.22.0, to verify before real money.
 
 Compared with the provider's own record: the outcome, the amount and the currency of a pending payment with a provider id, from 10 minutes to 7 days after it was created, and of a webhook's success that leaves out the money.
 

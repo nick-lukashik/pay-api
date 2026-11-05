@@ -9,3 +9,7 @@ allowBuilds:
 minimumReleaseAgeExclude:
     - "@nick-lukashik/auth@0.1.0"
     - "@nick-lukashik/contracts@0.1.0"
+# Dev tools only: patched versions of what Dependabot flags (esbuild through drizzle-kit, minimatch through glob).
+overrides:
+    "@esbuild-kit/core-utils>esbuild": 0.25.12
+    "glob@10>minimatch": 11.0.3

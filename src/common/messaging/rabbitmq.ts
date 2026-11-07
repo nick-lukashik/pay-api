@@ -17,6 +17,7 @@ import {
 } from 'amqplib'
 import { runWithContext } from '../context/request-context.js'
 import { DependencyDownError, HealthRegistry } from '../health/health.registry.js'
+import { safeErrorMessage } from '../logging/safe-error.js'
 import { Metrics } from '../metrics/metrics.js'
 import { type ConfirmedPublish, confirmedPublisher } from './confirm.js'
 import { type Envelope, envelopeSchema } from './event.js'
@@ -640,7 +641,7 @@ export class RabbitMq implements OnModuleInit, BeforeApplicationShutdown, OnAppl
         }
         const dead = failure instanceof PermanentError || attempt >= spec.retryDelaysMs.length
         const target = dead ? deadLetterQueueName(spec.name) : retryQueueName(spec.name, attempt)
-        const reason = failure instanceof Error ? failure.message : String(failure)
+        const reason = safeErrorMessage(failure)
         this.logger.warn(
             {
                 ...log,

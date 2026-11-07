@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common'
 import { runDetached } from '../context/request-context.js'
 import { type AnyDb, DB } from '../database/database.js'
+import { safeErrorMessage } from '../logging/safe-error.js'
 import { Metrics } from '../metrics/metrics.js'
 import { UnroutableError } from './confirm.js'
 import {
@@ -190,7 +191,7 @@ export class OutboxRelay implements OnApplicationBootstrap, BeforeApplicationShu
         } catch (error) {
             this.logger.error(
                 {
-                    err: (error as Error).message,
+                    err: safeErrorMessage(error),
                 },
                 'Outbox relay pass failed',
             )

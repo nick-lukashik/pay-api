@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino'
 import { stdTimeFunctions } from 'pino'
 import { currentContext } from '../context/request-context.js'
 import { requestIdOf } from '../http/request-id.js'
+import { serializeError } from './safe-error.js'
 
 export type LoggingOptions = {
     service: string
@@ -78,6 +79,7 @@ export function createLoggerModule(options: {
                         res: (res: { statusCode: number }) => ({
                             statusCode: res.statusCode,
                         }),
+                        err: serializeError,
                     },
                     redact: {
                         paths: REDACT_PATHS,

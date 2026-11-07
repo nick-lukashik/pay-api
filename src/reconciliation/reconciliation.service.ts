@@ -3,6 +3,7 @@ import type { ConfigType } from '@nestjs/config'
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { PaymentsService, paymentSucceededEvent } from '../checkout/payments.service.js'
 import { DB } from '../common/database/database.js'
+import { safeErrorMessage } from '../common/logging/safe-error.js'
 import { OutboxRelay } from '../common/messaging/outbox-relay.js'
 import { eventsExchange } from '../common/messaging/topology.js'
 import { Metrics } from '../common/metrics/metrics.js'
@@ -206,7 +207,7 @@ export class ReconciliationService implements OnApplicationBootstrap, BeforeAppl
             })
             this.logger.warn(
                 {
-                    err: (error as Error).message,
+                    err: safeErrorMessage(error),
                 },
                 'Reconciliation failed, the next round tries again',
             )
@@ -230,7 +231,7 @@ export class ReconciliationService implements OnApplicationBootstrap, BeforeAppl
             })
             this.logger.warn(
                 {
-                    err: (error as Error).message,
+                    err: safeErrorMessage(error),
                 },
                 'Provider sync failed, the next round tries again',
             )

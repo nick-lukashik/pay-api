@@ -4,23 +4,23 @@ Source: official docs (summarized): https://biomejs.dev/reference/configuration/
 
 - Biome is the only formatter and linter. Don't add ESLint or Prettier. The config is `biome.json` with `$schema` pointing at the installed version.
 - Commands:
-  - locally: `biome check --write` (formatting, safe linter fixes and import sorting);
-  - in CI: `biome ci`, which writes nothing;
-  - `--unsafe`: only after reviewing the diff;
-  - rule description: `biome explain <rule>`;
-  - run on changed files only: `--changed` or `--staged`.
+    - locally: `biome check --write` (formatting, safe linter fixes and import sorting);
+    - in CI: `biome ci`, which writes nothing;
+    - `--unsafe`: only after reviewing the diff;
+    - rule description: `biome explain <rule>`;
+    - run on changed files only: `--changed` or `--staged`.
 - After editing code, the agent runs `biome check --write` on the changed files and leaves no diagnostics.
 - v2 syntax:
-  - `files.includes` with negations such as `"!dist"`;
-  - `vcs: { enabled: true, clientKind: "git", useIgnoreFile: true }`;
-  - import sorting: `assist.actions.source.organizeImports`;
-  - after upgrading Biome: `biome migrate --write`.
+    - `files.includes` with negations such as `"!dist"`;
+    - `vcs: { enabled: true, clientKind: "git", useIgnoreFile: true }`;
+    - import sorting: `assist.actions.source.organizeImports`;
+    - after upgrading Biome: `biome migrate --write`.
 - Nest specifics:
-  - `javascript.parser.unsafeParameterDecoratorsEnabled: true` is required, otherwise parameter decorators (`@Body()`, `@Inject()`) don't parse;
-  - `style/useImportType: "off"` is off on purpose. Biome can't see that an import "used as a type" is needed at runtime for `emitDecoratorMetadata`, and the rule's docs advise the same. Don't enable it and don't switch provider imports to `import type`.
+    - `javascript.parser.unsafeParameterDecoratorsEnabled: true` is required, otherwise parameter decorators (`@Body()`, `@Inject()`) don't parse;
+    - `style/useImportType: "off"` is off on purpose. Biome can't see that an import "used as a type" is needed at runtime for `emitDecoratorMetadata`, and the rule's docs advise the same. Don't enable it and don't switch provider imports to `import type`.
 - Domains:
-  - `drizzle` provides `noDrizzleUpdateWithoutWhere` and `noDrizzleDeleteWithoutWhere`. List the object names in the `drizzleObjectName` option, for example `["db", "tx"]`;
-  - `test`: rules for tests;
-  - enable nursery rules (for example `noFloatingPromises` from the `types` domain) only deliberately: they are unstable.
+    - `drizzle` provides `noDrizzleUpdateWithoutWhere` and `noDrizzleDeleteWithoutWhere`. List the object names in the `drizzleObjectName` option, for example `["db", "tx"]`;
+    - `test`: rules for tests;
+    - enable nursery rules (for example `noFloatingPromises` from the `types` domain) only deliberately: they are unstable.
 - Suppress only at the specific spot: `// biome-ignore lint/<group>/<rule>: <reason>`. The reason is required. Don't disable a rule globally for one place; for particular paths use `overrides` with `includes`.
 - Don't work around the recommended rules `noExplicitAny` and `noNonNullAssertion`: use `unknown` with narrowing (Zod) instead of `any`, and an explicit check instead of `!`.

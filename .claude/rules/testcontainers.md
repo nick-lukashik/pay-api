@@ -7,17 +7,17 @@ Source: official docs (summarized): https://node.testcontainers.org/, https://no
 - Containers start once in the `integration` project's `globalSetup`, in parallel with `Promise.all`, and stop in teardown (`await container.stop()`). Don't start them in `beforeEach` or per file.
 - Exception: a failure test that stops and starts a dependency gets its own container in its file (`test/containers.ts`), also in CI where the shared ones are service containers. Bind a fixed free host port below the ephemeral range (`withExposedPorts({ container, host })`): Docker keeps it across stop and start, so the app's URL stays valid. Stop and start through `getContainerRuntimeClient()` (`client.container.stop/start`); `restart()` has no down window.
 - Take addresses only from the container itself:
-  - Postgres: `getConnectionUri()`;
-  - Redis: `getConnectionUrl()`;
-  - RabbitMQ: `getAmqpUrl()`;
-  - anything else: `getHost()` + `getMappedPort(port)`.
-    No `localhost:5432` and no fixed host ports.
+    - Postgres: `getConnectionUri()`;
+    - Redis: `getConnectionUrl()`;
+    - RabbitMQ: `getAmqpUrl()`;
+    - anything else: `getHost()` + `getMappedPort(port)`.
+      No `localhost:5432` and no fixed host ports.
 - Pass URL strings to the tests through `project.provide()`. The tests or the application create the clients.
 - Postgres:
-  - migrations are applied once in globalSetup with the same code as in prod (`migrate()` from `drizzle-orm/node-postgres/migrator`);
-  - for a fast reset, take a `snapshot()` after the migrations and call `restoreSnapshot()` later;
-  - close all connections before `snapshot()`, because it does `CREATE DATABASE … TEMPLATE`;
-  - `restoreSnapshot()` kills active connections (`DROP DATABASE … WITH (FORCE)`), so recreate the application's pools after it.
+    - migrations are applied once in globalSetup with the same code as in prod (`migrate()` from `drizzle-orm/node-postgres/migrator`);
+    - for a fast reset, take a `snapshot()` after the migrations and call `restoreSnapshot()` later;
+    - close all connections before `snapshot()`, because it does `CREATE DATABASE … TEMPLATE`;
+    - `restoreSnapshot()` kills active connections (`DROP DATABASE … WITH (FORCE)`), so recreate the application's pools after it.
 - RabbitMQ: the application itself declares the topology (the same `setup`). By hand, a test creates only its own test queues, and their names are unique.
 - Don't disable Ryuk (automatic cleanup of forgotten containers) without a reason. Set `TESTCONTAINERS_RYUK_DISABLED=true` only where Ryuk is impossible, and then teardown is mandatory.
 - `withReuse()` is only for speeding up local development. Not in CI and not where tests change shared data.

@@ -68,6 +68,7 @@ The core knows only `PaymentProvider` (`src/providers/provider.ts`). `PAY_PROVID
 Compared with the provider's own record: the outcome, the amount and the currency of a pending payment with a provider id, from 10 minutes to 7 days after it was created, and of a webhook's success that leaves out the money.
 
 Not yet:
+
 - comparing a pending payment older than 7 days, and expiring it: it stays pending;
 - comparing a `created` or `creating` payment: its checkout is looked for only when the buyer retries;
 - comparing a `failed` payment: a later success reaches it only by webhook;

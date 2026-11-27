@@ -7,19 +7,19 @@ Source: official docs (summarized): https://github.com/prometheus/client_js (REA
 - Call `collectDefaultMetrics({ register: registry })` once, when the registry is created.
 - Every metric has `name`, `help`, `labelNames` and `registers: [registry]`. Create metrics once in a provider, not in a request handler.
 - Names:
-  - snake_case and base units (`_seconds`, `_bytes`), counters get the `_total` suffix;
-  - a subsystem prefix: `http_`, `outbox_`, `jobs_`, `amqp_`;
-  - examples: `http_server_request_duration_seconds` (Histogram), `outbox_published_total`.
+    - snake_case and base units (`_seconds`, `_bytes`), counters get the `_total` suffix;
+    - a subsystem prefix: `http_`, `outbox_`, `jobs_`, `amqp_`;
+    - examples: `http_server_request_duration_seconds` (Histogram), `outbox_published_total`.
 - Labels have low cardinality and a closed set of values:
-  - allowed: `method`, `route`, `status_code` (or the status class), `queue`, `result`;
-  - `route` is the Nest route template such as `/items/:id`, not `req.url`;
-  - not allowed: ids, email, the raw path, the query, error text, requestId;
-  - a request with no route (a 404 before routing) gets a constant, for example `route="unmatched"`.
+    - allowed: `method`, `route`, `status_code` (or the status class), `queue`, `result`;
+    - `route` is the Nest route template such as `/items/:id`, not `req.url`;
+    - not allowed: ids, email, the raw path, the query, error text, requestId;
+    - a request with no route (a 404 before routing) gets a constant, for example `route="unmatched"`.
 - Measure durations with a Histogram, not a Summary: histograms aggregate across replicas. Timer: `startTimer(labels)` returns an `end(moreLabels)` function. Choose buckets to fit the SLO, and no more than needed.
 - Instantaneous values (queue depth, connection pool, outbox backlog) are a Gauge with `collect()`, which is called on scrape. Don't update them with `setInterval`.
 - The `/metrics` endpoint:
-  - responds with `res.type(registry.contentType)` and `await registry.metrics()`;
-  - sits outside the global API prefix, with no throttler and no request logging;
-  - is not published externally through the ingress.
+    - responds with `res.type(registry.contentType)` and `await registry.metrics()`;
+    - sits outside the global API prefix, with no throttler and no request logging;
+    - is not published externally through the ingress.
 - Don't add instance and pod labels through `setDefaultLabels`: Prometheus itself sets them from the target.
 - In tests, each application instance gets a fresh `Registry`. Check values with `await metric.get()` or `registry.getSingleMetricAsString(name)`.
